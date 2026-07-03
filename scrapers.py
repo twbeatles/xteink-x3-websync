@@ -221,6 +221,13 @@ class NaverBlogScraper(BaseScraper):
                 for img in content_elem.find_all("img"):
                     img.decompose()
 
+                # 모든 하위 태그에 대해 인라인 style 및 class 속성 강제 삭제 (글자 배경색/강조색 제거 및 텍스트화 최적화)
+                for tag in content_elem.find_all(True):
+                    if tag.has_attr("style"):
+                        del tag["style"]
+                    if tag.has_attr("class"):
+                        del tag["class"]
+
                 # 텍스트 가독성 최적화를 위해 불필요 빈 줄 div 등 가독 패치
                 content_html = str(content_elem)
                 
