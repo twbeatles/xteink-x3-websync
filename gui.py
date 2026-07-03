@@ -565,7 +565,7 @@ class SyncAppGui:
         name_entry.grid(row=0, column=1, sticky="w", pady=8)
 
         ttk.Label(frame, text="타입 (유형):").grid(row=1, column=0, sticky="w", pady=8)
-        type_cb = ttk.Combobox(frame, values=["css", "rss"], state="readonly", width=10)
+        type_cb = ttk.Combobox(frame, values=["css", "rss", "naver"], state="readonly", width=10)
         type_cb.grid(row=1, column=1, sticky="w", pady=8)
         type_cb.set("css")
 
@@ -606,7 +606,7 @@ class SyncAppGui:
 
         def on_type_change(event):
             t = type_cb.get()
-            if t == "rss":
+            if t in ("rss", "naver"):
                 item_entry.config(state="disabled")
                 title_entry.config(state="disabled")
                 content_entry.config(state="disabled")
