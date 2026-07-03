@@ -22,11 +22,20 @@ class X3Uploader:
             safe_base = "sync_book"
         safe_file_name = safe_base + ext.lower()
 
+        # ⚠️ 대용량 도서(예: PDF) 업로드 중 끊김 방지용 가변 타임아웃 계산
+        # 기본 25초에 1MB당 5초씩 가변 버퍼 대기 시간 추가
+        try:
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        except Exception:
+            file_size_mb = 1.0 # 획득 실패 시 기본 1MB 취급
+            
+        adaptive_timeout = int(25 + (file_size_mb * 5))
+
         try:
             with open(file_path, "rb") as f:
                 # 안전한 파일명으로 헤더 구성하여 전송
                 files = {"file": (safe_file_name, f, "application/epub+zip")}
-                response = requests.post(url, files=files, timeout=25)
+                response = requests.post(url, files=files, timeout=adaptive_timeout)
             
             if response.status_code == 200:
                 return True
@@ -34,7 +43,7 @@ class X3Uploader:
                 print(f"❌ 전송 응답 오류: HTTP {response.status_code}")
                 return False
         except Exception as e:
-            print(f"❌ 전송 실패: {e}")
+            print(f"❌ 전송 실패 (타임아웃 {adaptive_timeout}초): {e}")
             print("💡 팁: CrossPoint 기기가 켜져 있고 Wi-Fi 또는 충전 케이블에 안정적으로 연결되어 있는지 확인해 주세요.")
             print("    (CrossPoint는 기기가 절전 모드로 진입하면 무선 연결을 자동 차단합니다.)")
             return False
@@ -47,3 +56,4 @@ class X3Uploader:
             return True
         except Exception:
             return False
+

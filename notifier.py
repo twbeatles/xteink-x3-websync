@@ -5,24 +5,25 @@ class ToastNotifier:
     @staticmethod
     def show_toast(title: str, text: str, is_error: bool = False):
         icon = "Error" if is_error else "Info"
-        # PowerShell COM Object를 활용한 무설치 네이티브 토스트 스크립트
-        ps_cmd = f"""
-        [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms");
-        $obj = New-Object System.Windows.Forms.NotifyIcon;
-        $obj.Icon = [System.Drawing.SystemIcons]::Information;
-        $obj.BalloonTipIcon = "{icon}";
-        $obj.BalloonTipTitle = "{title}";
-        $obj.BalloonTipText = "{text}";
-        $obj.Visible = $True;
-        $obj.ShowBalloonTip(5000);
-        """
+        # 쉘 인젝션 차단: 스크립트 템플릿과 데이터를 분리해 파라미터($args)로 안전하게 주입
+        ps_script = (
+            '[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms"); '
+            '$obj = New-Object System.Windows.Forms.NotifyIcon; '
+            '$obj.Icon = [System.Drawing.SystemIcons]::Information; '
+            '$obj.BalloonTipIcon = $args[2]; '
+            '$obj.BalloonTipTitle = $args[0]; '
+            '$obj.BalloonTipText = $args[1]; '
+            '$obj.Visible = $True; '
+            '$obj.ShowBalloonTip(5000);'
+        )
         try:
-            # 백그라운드로 실행하여 파이썬 메인 쓰레드 블로킹 방지
+            # 백그라운드로 실행하며 args를 리스트로 기입해 쉘 주입 원천 봉쇄
             subprocess.Popen(
-                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                ["powershell", "-NoProfile", "-Command", ps_script, title, text, icon],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
         except Exception as e:
             print(f"⚠️ 시스템 알림 표시 실패: {e}")
+

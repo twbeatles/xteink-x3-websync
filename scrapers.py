@@ -140,11 +140,21 @@ class NaverBlogScraper(BaseScraper):
         url = site_config.get("url")
         limit = site_config.get("limit", 5)
 
-        # 블로그 ID 추출 (예: https://blog.naver.com/ranto28 -> ranto28)
-        match = re.search(r"blog\.naver\.com/([a-zA-Z0-9_\-]+)", url)
-        if not match:
-            raise Exception("올바른 네이버 블로그 URL 형식이 아닙니다. (예: https://blog.naver.com/아이디)")
-        blog_id = match.group(1)
+        # 블로그 ID 추출 (다양한 네이버 주소 유형 지원: m.blog.naver.com, blog.naver.com, ID.blog.me)
+        blog_id = None
+        
+        # 1. 일반 및 모바일 도메인 매칭 (blog.naver.com/ID 또는 m.blog.naver.com/ID)
+        naver_match = re.search(r"blog\.naver\.com/([a-zA-Z0-9_\-]+)", url)
+        if naver_match:
+            blog_id = naver_match.group(1)
+        else:
+            # 2. 구형/개인 도메인 매칭 (ID.blog.me)
+            me_match = re.search(r"([a-zA-Z0-9_\-]+)\.blog\.me", url)
+            if me_match:
+                blog_id = me_match.group(1)
+                
+        if not blog_id:
+            raise Exception("올바른 네이버 블로그 URL 형식이 아닙니다. (예: https://blog.naver.com/아이디 또는 https://아이디.blog.me)")
 
         # 네이버 블로그 RSS 피드 URL 구성
         rss_url = f"https://rss.blog.naver.com/{blog_id}.xml"
