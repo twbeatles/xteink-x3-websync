@@ -6,6 +6,9 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
+_opds_api_key: str = ""
+_require_auth: bool = False
+
 
 class OPDSHandler(BaseHTTPRequestHandler):
     """OPDS XML 카탈로그 및 파일 다운로드를 처리하는 HTTP 핸들러"""
@@ -14,10 +17,31 @@ class OPDSHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _check_auth(self) -> bool:
+        if not _require_auth:
+            return True
+        if not _opds_api_key:
+            return False
+        auth = self.headers.get("Authorization", "")
+        if auth == f"Bearer {_opds_api_key}":
+            return True
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        if qs.get("api_key", [None])[0] == _opds_api_key:
+            return True
+        api_header = self.headers.get("X-Api-Key", "")
+        if api_header == _opds_api_key:
+            return True
+        self.send_error(401, "Unauthorized")
+        return False
+
     def do_GET(self):
-        if self.path in ("/", "/opds", "/opds/"):
+        if not self._check_auth():
+            return
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/opds", "/opds/"):
             self._serve_catalog()
-        elif self.path.startswith("/opds/download/"):
+        elif path.startswith("/opds/download/"):
             self._serve_file()
         else:
             self.send_error(404)
@@ -61,8 +85,12 @@ class OPDSHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_file(self):
-        fname = self.path[len("/opds/download/"):]
+        path = self.path.split("?", 1)[0]
+        fname = path[len("/opds/download/"):]
         fname = os.path.basename(fname)
+        if not fname.lower().endswith(".epub"):
+            self.send_error(403)
+            return
         fpath = os.path.join(self.output_dir, fname)
         if not os.path.isfile(fpath):
             self.send_error(404)
@@ -79,10 +107,19 @@ class OPDSHandler(BaseHTTPRequestHandler):
 class OPDSServer:
     """OPDS HTTP 서버를 백그라운드 스레드로 실행·관리하는 클래스"""
 
-    def __init__(self, output_dir: str = "./output", port: int = 8765, bind_host: str = "127.0.0.1"):
+    def __init__(
+        self,
+        output_dir: str = "./output",
+        port: int = 8765,
+        bind_host: str = "127.0.0.1",
+        api_key: str = "",
+        require_auth: bool = False,
+    ):
         self.output_dir = output_dir
         self.port = port
         self.bind_host = bind_host
+        self.api_key = api_key
+        self.require_auth = require_auth
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -90,6 +127,12 @@ class OPDSServer:
     def start(self) -> bool:
         if self._running:
             return True
+        global _opds_api_key, _require_auth
+        _require_auth = self.require_auth
+        _opds_api_key = self.api_key or ""
+        if _require_auth and not _opds_api_key:
+            print("❌ OPDS: LAN 공개 모드에는 api_key가 필요합니다.")
+            return False
         try:
             OPDSHandler.output_dir = self.output_dir
             self._server = HTTPServer((self.bind_host, self.port), OPDSHandler)

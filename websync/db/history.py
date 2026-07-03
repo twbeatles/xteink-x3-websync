@@ -3,6 +3,11 @@ import os
 import threading
 from websync.core.paths import PROJECT_ROOT, resolve_path
 
+
+class SyncHistoryDbError(Exception):
+    """동기화 이력 DB 접근 실패"""
+
+
 class SyncHistoryDb:
     """이미 기기로 전송(동기화) 완료된 게시글/포스트 이력을 관리하는 SQLite DB 클래스"""
     _db_lock = threading.Lock() # 스레드 간 DB 접근 Race Condition 차단을 위한 락
@@ -43,8 +48,7 @@ class SyncHistoryDb:
                     cursor.execute("SELECT 1 FROM synced_posts WHERE url = ?", (url,))
                     return cursor.fetchone() is not None
             except Exception as e:
-                print(f"⚠️ DB 조회 실패: {e}")
-                return False
+                raise SyncHistoryDbError(f"DB 조회 실패: {e}") from e
 
     def mark_synced(self, url: str, site_name: str, title: str):
         """포스트 전송 완료 후 이력 테이블에 저장"""

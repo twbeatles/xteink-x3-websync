@@ -129,25 +129,33 @@ def release_instance_lock():
 
 
 def main():
-    if not acquire_instance_lock():
-        print(f"[{datetime.now()}] ⚠️ 경고: 이미 다른 X3 WebSync 프로그램 인스턴스가 실행 중입니다. 실행을 중단합니다.")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Xteink X3 WebSync CLI / GUI Manager")
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="GUI 없이 config.json 기준 즉시 동기화 (스케줄러 연동용)"
+    )
+    args = parser.parse_args()
+
+    # GUI만 단일 인스턴스 락 — --sync는 파이프라인 락(SyncService)만 사용해 GUI 실행 중에도 동작
+    gui_lock_acquired = False
+    if not args.sync:
+        if not acquire_instance_lock():
+            print(f"[{datetime.now()}] ⚠️ 경고: 이미 다른 X3 WebSync GUI가 실행 중입니다. 실행을 중단합니다.")
+            sys.exit(1)
+        gui_lock_acquired = True
 
     try:
         logger = get_logger()
         logger.info("=" * 60)
-        logger.info(f"X3 WebSync 시작 (PID: {os.getpid()})")
+        logger.info(f"X3 WebSync 시작 (PID: {os.getpid()}, mode={'sync' if args.sync else 'gui'})")
 
-        parser = argparse.ArgumentParser(description="Xteink X3 WebSync CLI / GUI Manager")
-        parser.add_argument(
-            "--sync",
-            action="store_true",
-            help="GUI 없이 config.json 기준 즉시 동기화 (스케줄러 연동용)"
-        )
-        args = parser.parse_args()
-
-        config_manager = ConfigManager()
-        service = SyncService(config_manager)
+        try:
+            config_manager = ConfigManager()
+            service = SyncService(config_manager)
+        except Exception as e:
+            print(f"[{datetime.now()}] ❌ 설정 로드 실패: {e}")
+            sys.exit(1)
 
         if args.sync:
             print(f"[{datetime.now()}] 백그라운드 동기화 모드 구동 시작")
@@ -158,7 +166,8 @@ def main():
             app = SyncAppGui(service)
             app.run()
     finally:
-        release_instance_lock()
+        if gui_lock_acquired:
+            release_instance_lock()
 
 
 if __name__ == "__main__":

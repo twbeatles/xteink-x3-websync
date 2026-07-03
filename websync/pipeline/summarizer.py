@@ -61,7 +61,15 @@ class Summarizer:
         )
         with urllib.request.urlopen(req, timeout=20) as resp:
             result = json.loads(resp.read())
-        summary = result["choices"][0]["message"]["content"].strip()
+        choices = result.get("choices") or []
+        if not choices:
+            print("⚠️ AI 요약: OpenAI 응답에 choices가 없습니다.")
+            return ""
+        message = choices[0].get("message") or {}
+        summary = (message.get("content") or "").strip()
+        if not summary:
+            print("⚠️ AI 요약: OpenAI 응답 본문이 비어 있습니다.")
+            return ""
         return self._format_summary(summary)
 
     def _call_ollama(self, prompt: str) -> str:

@@ -21,7 +21,10 @@ class SyncAppGui:
     def __init__(self, service: SyncService):
         self.service = service
         self.scheduler = SchedulerManager()
-        self.calibre = CalibreManager(self.service.config.get("calibre_path", "C:\\Program Files\\Calibre2\\calibredb.exe"))
+        self.calibre = CalibreManager(
+            self.service.config.get("calibre_path", "C:\\Program Files\\Calibre2\\calibredb.exe"),
+            self.service.config.get("calibre_library_path", ""),
+        )
 
         # 서버 인스턴스
         self._opds_server: OPDSServer | None = None
@@ -32,11 +35,15 @@ class SyncAppGui:
         self.root = tk.Tk()
         self.root.title("Xteink X3 WebSync Manager")
         self.root.geometry("860x760")
+        self.root.minsize(640, 480)
         self.root.resizable(True, True)
+
+        self._sync_busy = False
 
         self._setup_styles()
         self._build_ui()
         self._load_config_to_ui()
+        self.root.after(0, lambda: self._center_window(self.root, 860, 760))
 
         # 종료 시 서버 정리
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -57,6 +64,7 @@ class SyncAppGui:
         self.GREEN_COLOR   = "#198754" # 상태 양호 초록색
         self.RED_COLOR     = "#dc3545" # 에러 빨간색
         self.YELLOW_COLOR  = "#fd7e14" # 미확인/대기 주황색
+        self.HINT_COLOR    = "#6c757d" # 보조 힌트 텍스트
 
         self.root.configure(bg=self.BG_COLOR)
         self.style.configure(".", background=self.BG_COLOR, foreground=self.FG_COLOR, font=("Malgun Gothic", 9))
@@ -88,123 +96,262 @@ class SyncAppGui:
         self.style.map("Treeview", background=[("selected", self.ACCENT_COLOR)], foreground=[("selected", "#ffffff")])
         self.style.configure("Treeview.Heading", background=self.SECONDARY_BG, foreground=self.FG_COLOR, bordercolor=self.SECONDARY_BG, font=("Malgun Gothic", 9, "bold"))
         self.style.configure("TProgressbar", troughcolor=self.SECONDARY_BG, background=self.ACCENT_COLOR, thickness=8)
+        self.style.configure("TCheckbutton", background=self.BG_COLOR, foreground=self.FG_COLOR)
 
+    # ------------------------------------------------------------------
+    # UI 헬퍼
+    # ------------------------------------------------------------------
+    def _center_window(self, window: tk.Misc, width: int | None = None, height: int | None = None) -> None:
+        window.update_idletasks()
+        w = width or window.winfo_width()
+        h = height or window.winfo_height()
+        x = max(0, (window.winfo_screenwidth() - w) // 2)
+        y = max(0, (window.winfo_screenheight() - h) // 2)
+        if width and height:
+            window.geometry(f"{width}x{height}+{x}+{y}")
+        else:
+            window.geometry(f"+{x}+{y}")
+
+    def _setup_dialog(self, dialog: tk.Toplevel, width: int, height: int, *, resizable: bool = True) -> None:
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(resizable, resizable)
+        dialog.minsize(min(width, 420), min(height, 240))
+        self._center_window(dialog, width, height)
+
+    def _bind_widget_mousewheel(self, widget: tk.Misc, handler) -> None:
+        widget.bind("<MouseWheel>", handler, add="+")
+        for child in widget.winfo_children():
+            if child.winfo_class() in ("Treeview", "Text", "TCombobox", "TSpinbox"):
+                continue
+            self._bind_widget_mousewheel(child, handler)
+
+    def _bind_text_mousewheel(self, text_widget: tk.Text) -> None:
+        def _on_mousewheel(event):
+            text_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+        text_widget.bind("<MouseWheel>", _on_mousewheel)
+
+    def _mount_tree_with_scrollbars(self, parent, tree: ttk.Treeview, *, padx=10, pady=8) -> ttk.Frame:
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill="both", expand=True, padx=padx, pady=pady)
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        return tree_frame
+
+    def _set_sync_ui_busy(self, busy: bool) -> None:
+        self._sync_busy = busy
+        state = "disabled" if busy else "normal"
+        for widget in (
+            self.sync_now_btn,
+            self.direct_upload_btn,
+            self.calibre_send_btn,
+            self.calibre_conn_btn,
+            self.test_conn_btn,
+        ):
+            widget.config(state=state)
+
+    def _bind_autosave(self, widget: tk.Misc) -> None:
+        widget.bind("<FocusOut>", lambda _e: self._save_ui_settings())
+
+    # ------------------------------------------------------------------
+    # 스크롤 컨테이너
+    # ------------------------------------------------------------------
+    def _create_scrollable_frame(self, parent) -> ttk.Frame:
+        """세로 스크롤이 가능한 내부 프레임을 생성합니다."""
+        container = ttk.Frame(parent)
+        container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(container, highlightthickness=0, bg=self.BG_COLOR)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        def _on_frame_configure(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        scrollable_frame.bind("<Configure>", _on_frame_configure)
+
+        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(window_id, width=event.width)
+
+        canvas.bind("<Configure>", _on_canvas_configure)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        self._bind_widget_mousewheel(scrollable_frame, _on_mousewheel)
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+
+        return scrollable_frame
 
     # ------------------------------------------------------------------
     # UI 빌드
     # ------------------------------------------------------------------
     def _build_ui(self):
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.main_paned = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
+        self.main_paned.pack(fill="both", expand=True, padx=10, pady=10)
+
+        tab_container = ttk.Frame(self.main_paned)
+        self.main_paned.add(tab_container, weight=3)
+
+        self.notebook = ttk.Notebook(tab_container)
+        self.notebook.pack(fill="both", expand=True)
 
         self.tab_sync    = ttk.Frame(self.notebook)
         self.tab_calibre = ttk.Frame(self.notebook)
         self.tab_history = ttk.Frame(self.notebook)
         self.tab_server  = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_sync,    text=" 뉴스 동기화 및 일반설정 ")
-        self.notebook.add(self.tab_calibre, text=" Calibre 서재 연동 ")
+        self.notebook.add(self.tab_sync,    text=" 뉴스 동기화 ")
+        self.notebook.add(self.tab_calibre, text=" Calibre 서재 ")
         self.notebook.add(self.tab_history, text=" 📋 동기화 이력 ")
-        self.notebook.add(self.tab_server,  text=" ⚙️ 서버 & 고급 설정 ")
+        self.notebook.add(self.tab_server,  text=" ⚙️ 서버 설정 ")
 
         self._build_tab_sync()
         self._build_tab_calibre()
         self._build_tab_history()
         self._build_tab_server()
-        self._build_bottom_bar()
+
+        bottom_container = ttk.Frame(self.main_paned)
+        self.main_paned.add(bottom_container, weight=1)
+        self._build_bottom_bar(bottom_container)
 
     # ── 탭 1: 뉴스 동기화 ────────────────────────────────────────────
     def _build_tab_sync(self):
+        body = self._create_scrollable_frame(self.tab_sync)
+
         # 기기 및 경로
-        settings_frame = ttk.LabelFrame(self.tab_sync, text=" 기기 및 경로 설정 ")
+        settings_frame = ttk.LabelFrame(body, text=" 기기 및 경로 설정 ")
         settings_frame.pack(fill="x", padx=15, pady=8)
+        settings_frame.columnconfigure(1, weight=1)
 
         ttk.Label(settings_frame, text="X3 주소 (IP/호스트):").grid(row=0, column=0, padx=10, pady=6, sticky="w")
         self.ip_entry = ttk.Entry(settings_frame, width=22, font=("Consolas", 10))
-        self.ip_entry.grid(row=0, column=1, padx=5, pady=6, sticky="w")
+        self.ip_entry.grid(row=0, column=1, padx=5, pady=6, sticky="we")
         self.test_conn_btn = ttk.Button(settings_frame, text="연결 확인", command=self._test_connection)
         self.test_conn_btn.grid(row=0, column=2, padx=5, pady=6)
         self.conn_status_label = ttk.Label(settings_frame, text="미확인", foreground=self.YELLOW_COLOR)
         self.conn_status_label.grid(row=0, column=3, padx=10, pady=6, sticky="w")
 
         ttk.Label(settings_frame, text="출력 저장 폴더:").grid(row=1, column=0, padx=10, pady=6, sticky="w")
-        self.dir_entry = ttk.Entry(settings_frame, width=45)
-        self.dir_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=6, sticky="we")
-        ttk.Button(settings_frame, text="폴더 선택", command=self._browse_directory).grid(row=1, column=3, padx=5, pady=6)
-        ttk.Button(settings_frame, text="📂 열기", command=self._open_output_folder).grid(row=1, column=4, padx=5, pady=6)
+        self.dir_entry = ttk.Entry(settings_frame)
+        self.dir_entry.grid(row=1, column=1, padx=5, pady=6, sticky="we")
+        ttk.Button(settings_frame, text="폴더 선택", command=self._browse_directory).grid(row=1, column=2, padx=5, pady=6)
+        ttk.Button(settings_frame, text="📂 열기", command=self._open_output_folder).grid(row=1, column=3, padx=5, pady=6)
 
-        devices_frame = ttk.LabelFrame(self.tab_sync, text=" 추가 X3 기기 (다중 무선 전송) ")
+        self._bind_autosave(self.ip_entry)
+        self._bind_autosave(self.dir_entry)
+
+        devices_frame = ttk.LabelFrame(body, text=" 추가 X3 기기 (다중 무선 전송) ")
         devices_frame.pack(fill="x", padx=15, pady=5)
-        self.devices_tree = ttk.Treeview(devices_frame, columns=("name", "ip"), show="headings", height=3)
+        devices_frame.columnconfigure(0, weight=1)
+
+        devices_inner = ttk.Frame(devices_frame)
+        devices_inner.pack(fill="x", padx=10, pady=8)
+        devices_inner.columnconfigure(0, weight=1)
+        devices_inner.rowconfigure(0, weight=1)
+
+        tree_holder = ttk.Frame(devices_inner)
+        tree_holder.grid(row=0, column=0, sticky="nsew")
+        self.devices_tree = ttk.Treeview(tree_holder, columns=("name", "ip"), show="headings", height=3)
         self.devices_tree.heading("name", text="기기 이름")
         self.devices_tree.heading("ip", text="IP/호스트")
-        self.devices_tree.column("name", width=180)
-        self.devices_tree.column("ip", width=220)
-        self.devices_tree.pack(side="left", fill="x", expand=True, padx=10, pady=8)
-        dev_btn = ttk.Frame(devices_frame)
-        dev_btn.pack(side="right", padx=10, pady=8)
+        self.devices_tree.column("name", width=180, minwidth=100)
+        self.devices_tree.column("ip", width=220, minwidth=120)
+        self._mount_tree_with_scrollbars(tree_holder, self.devices_tree, padx=0, pady=0)
+
+        dev_btn = ttk.Frame(devices_inner)
+        dev_btn.grid(row=0, column=1, padx=(8, 0), sticky="n")
         ttk.Button(dev_btn, text="기기 추가", command=self._add_device_popup).pack(fill="x", pady=2)
         ttk.Button(dev_btn, text="선택 삭제", command=self._remove_device).pack(fill="x", pady=2)
-        ttk.Label(devices_frame, text="기본 X3 주소 외 추가 기기를 등록하면 동기화 시 모든 기기로 전송합니다.", font=("Malgun Gothic", 8), foreground="#6c757d").pack(side="bottom", padx=10, pady=(0, 6))
+
+        ttk.Label(
+            devices_frame,
+            text="기본 X3 주소 외 추가 기기를 등록하면 동기화 시 모든 기기로 전송합니다.",
+            font=("Malgun Gothic", 8),
+            foreground=self.HINT_COLOR,
+        ).pack(fill="x", padx=10, pady=(0, 6))
 
         # 폰트 설정
-        font_frame = ttk.LabelFrame(self.tab_sync, text=" 한국어 가독성 스타일 최적화 (EPUB 포맷팅) ")
+        font_frame = ttk.LabelFrame(body, text=" 한국어 가독성 스타일 최적화 (EPUB 포맷팅) ")
         font_frame.pack(fill="x", padx=15, pady=5)
 
         ttk.Label(font_frame, text="폰트:").grid(row=0, column=0, padx=10, pady=6, sticky="w")
-        self.font_cb = ttk.Combobox(font_frame, values=["serif", "sans-serif", "KoPubWorldBatang", "NanumGothic", "Malgun Gothic"], width=15)
+        self.font_cb = ttk.Combobox(
+            font_frame,
+            values=["serif", "sans-serif", "KoPubWorldBatang", "NanumGothic", "Malgun Gothic"],
+            width=15,
+            state="readonly",
+        )
         self.font_cb.grid(row=0, column=1, padx=5, pady=6, sticky="w")
         self.font_cb.set("serif")
+        self.font_cb.bind("<<ComboboxSelected>>", lambda _e: self._save_ui_settings())
 
         ttk.Label(font_frame, text="글자 크기:").grid(row=0, column=2, padx=15, pady=6, sticky="w")
         self.font_size_sp = ttk.Spinbox(font_frame, from_=10, to=30, width=5)
         self.font_size_sp.grid(row=0, column=3, padx=5, pady=6, sticky="w")
         self.font_size_sp.set("16")
+        self._bind_autosave(self.font_size_sp)
 
         ttk.Label(font_frame, text="줄 간격:").grid(row=0, column=4, padx=15, pady=6, sticky="w")
         self.line_height_sp = ttk.Spinbox(font_frame, from_=1.0, to=3.0, increment=0.1, width=5)
         self.line_height_sp.grid(row=0, column=5, padx=5, pady=6, sticky="w")
         self.line_height_sp.set("1.7")
+        self._bind_autosave(self.line_height_sp)
 
         self.cover_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(font_frame, text="EPUB 표지 자동 생성", variable=self.cover_var).grid(row=0, column=6, padx=10, pady=6)
+        cover_cb = ttk.Checkbutton(font_frame, text="EPUB 표지 자동 생성", variable=self.cover_var, command=self._save_ui_settings)
+        cover_cb.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 6), sticky="w")
 
         # 사이트 관리
-        sites_frame = ttk.LabelFrame(self.tab_sync, text=" 동기화 대상 사이트 관리 ")
-        sites_frame.pack(fill="both", expand=True, padx=15, pady=5)
+        sites_frame = ttk.LabelFrame(body, text=" 동기화 대상 사이트 관리 ")
+        sites_frame.pack(fill="x", padx=15, pady=5)
 
         columns = ("name", "type", "enabled", "url")
-        self.tree = ttk.Treeview(sites_frame, columns=columns, show="headings")
+        self.tree = ttk.Treeview(sites_frame, columns=columns, show="headings", height=6)
         self.tree.heading("name", text="사이트 이름")
         self.tree.heading("type", text="유형")
         self.tree.heading("enabled", text="활성화")
         self.tree.heading("url", text="URL")
-        self.tree.column("name", width=140, anchor="w")
-        self.tree.column("type", width=60, anchor="center")
-        self.tree.column("enabled", width=55, anchor="center")
-        self.tree.column("url", width=390, anchor="w")
-        self.tree.pack(side="left", fill="both", expand=True, padx=10, pady=8)
-
-        scrollbar = ttk.Scrollbar(sites_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=8)
+        self.tree.column("name", width=140, minwidth=80, anchor="w")
+        self.tree.column("type", width=60, minwidth=50, anchor="center")
+        self.tree.column("enabled", width=55, minwidth=45, anchor="center")
+        self.tree.column("url", width=390, minwidth=120, anchor="w")
+        self._mount_tree_with_scrollbars(sites_frame, self.tree)
+        self.tree.bind("<Double-1>", lambda _e: self._edit_site_popup())
 
         btn_frame = ttk.Frame(sites_frame)
-        btn_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
+        btn_frame.pack(fill="x", padx=10, pady=(0, 8))
         ttk.Button(btn_frame, text="사이트 추가", command=self._add_site_popup).pack(side="left", padx=3)
         ttk.Button(btn_frame, text="사이트 수정", command=self._edit_site_popup).pack(side="left", padx=3)
         ttk.Button(btn_frame, text="선택 삭제", command=self._delete_site).pack(side="left", padx=3)
         ttk.Button(btn_frame, text="활성 토글", command=self._toggle_site_enabled).pack(side="left", padx=3)
 
         # 하단 그리드: 직접 전송 + 스케줄러
-        bottom_grid = ttk.Frame(self.tab_sync)
+        bottom_grid = ttk.Frame(body)
         bottom_grid.pack(fill="x", padx=15, pady=5)
         bottom_grid.columnconfigure(0, weight=1)
         bottom_grid.columnconfigure(1, weight=1)
 
         upload_frame = ttk.LabelFrame(bottom_grid, text=" 로컬 파일 X3 직접 전송 ")
         upload_frame.grid(row=0, column=0, padx=(0, 5), sticky="nswe")
-        self.file_entry = ttk.Entry(upload_frame, width=28)
+        upload_frame.columnconfigure(0, weight=1)
+        self.file_entry = ttk.Entry(upload_frame)
         self.file_entry.grid(row=0, column=0, padx=8, pady=10, sticky="we")
         ttk.Button(upload_frame, text="...", width=3, command=self._browse_file).grid(row=0, column=1, padx=3, pady=10)
         self.direct_upload_btn = ttk.Button(upload_frame, text="기기로 직접 전송", command=self._direct_upload)
@@ -219,79 +366,97 @@ class SyncAppGui:
         self.min_cb.grid(row=0, column=2, padx=2, pady=10)
         ttk.Button(scheduler_frame, text="등록", command=self._register_schedule).grid(row=0, column=3, padx=3, pady=10)
         ttk.Button(scheduler_frame, text="해제", command=self._unregister_schedule).grid(row=0, column=4, padx=3, pady=10)
-        self.sched_status_label = ttk.Label(scheduler_frame, text="스케줄 확인 중...", font=("Malgun Gothic", 8))
+        self.sched_status_label = ttk.Label(scheduler_frame, text="스케줄 확인 중...", font=("Malgun Gothic", 8), foreground=self.HINT_COLOR)
         self.sched_status_label.grid(row=1, column=0, columnspan=5, padx=8, pady=(0, 6), sticky="w")
 
     # ── 탭 2: Calibre 서재 ──────────────────────────────────────────
     def _build_tab_calibre(self):
-        calibre_top_frame = ttk.LabelFrame(self.tab_calibre, text=" Calibre 연동 설정 ")
+        body = self._create_scrollable_frame(self.tab_calibre)
+
+        calibre_top_frame = ttk.LabelFrame(body, text=" Calibre 연동 설정 ")
         calibre_top_frame.pack(fill="x", padx=15, pady=10)
+        calibre_top_frame.columnconfigure(1, weight=1)
 
         ttk.Label(calibre_top_frame, text="calibredb.exe 경로:").grid(row=0, column=0, padx=10, pady=8, sticky="w")
-        self.calibre_entry = ttk.Entry(calibre_top_frame, width=50)
+        self.calibre_entry = ttk.Entry(calibre_top_frame)
         self.calibre_entry.grid(row=0, column=1, padx=5, pady=8, sticky="we")
         ttk.Button(calibre_top_frame, text="찾아보기", command=self._browse_calibredb).grid(row=0, column=2, padx=5, pady=8)
         self.calibre_conn_btn = ttk.Button(calibre_top_frame, text="연결 확인 & 서재 로드", command=self._test_and_load_calibre)
         self.calibre_conn_btn.grid(row=0, column=3, padx=10, pady=8)
+        self._bind_autosave(self.calibre_entry)
 
-        calibre_list_frame = ttk.LabelFrame(self.tab_calibre, text=" 내 Calibre 서재 도서 목록 ")
-        calibre_list_frame.pack(fill="both", expand=True, padx=15, pady=5)
+        ttk.Label(calibre_top_frame, text="라이브러리 경로 (선택):").grid(row=1, column=0, padx=10, pady=8, sticky="w")
+        self.calibre_lib_entry = ttk.Entry(calibre_top_frame)
+        self.calibre_lib_entry.grid(row=1, column=1, padx=5, pady=8, sticky="we")
+        ttk.Button(calibre_top_frame, text="폴더 선택", command=self._browse_calibre_library).grid(row=1, column=2, padx=5, pady=8)
+        ttk.Label(
+            calibre_top_frame,
+            text="비워두면 Calibre 기본 라이브러리 사용",
+            font=("Malgun Gothic", 8),
+            foreground=self.HINT_COLOR,
+        ).grid(row=1, column=3, padx=10, pady=8, sticky="w")
+        self._bind_autosave(self.calibre_lib_entry)
+
+        calibre_list_frame = ttk.LabelFrame(body, text=" 내 Calibre 서재 도서 목록 ")
+        calibre_list_frame.pack(fill="x", padx=15, pady=5)
 
         c_columns = ("id", "title", "authors", "formats")
-        self.calibre_tree = ttk.Treeview(calibre_list_frame, columns=c_columns, show="headings")
+        self.calibre_tree = ttk.Treeview(calibre_list_frame, columns=c_columns, show="headings", height=8)
         self.calibre_tree.heading("id", text="ID")
         self.calibre_tree.heading("title", text="도서 제목")
         self.calibre_tree.heading("authors", text="저자")
         self.calibre_tree.heading("formats", text="보유 포맷")
-        self.calibre_tree.column("id", width=50, anchor="center")
-        self.calibre_tree.column("title", width=320, anchor="w")
-        self.calibre_tree.column("authors", width=180, anchor="w")
-        self.calibre_tree.column("formats", width=120, anchor="center")
-        self.calibre_tree.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        self.calibre_tree.column("id", width=50, minwidth=40, anchor="center")
+        self.calibre_tree.column("title", width=320, minwidth=120, anchor="w")
+        self.calibre_tree.column("authors", width=180, minwidth=80, anchor="w")
+        self.calibre_tree.column("formats", width=120, minwidth=80, anchor="center")
+        self._mount_tree_with_scrollbars(calibre_list_frame, self.calibre_tree, padx=10, pady=10)
 
-        c_scrollbar = ttk.Scrollbar(calibre_list_frame, orient="vertical", command=self.calibre_tree.yview)
-        self.calibre_tree.configure(yscrollcommand=c_scrollbar.set)
-        c_scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=10)
-
-        calibre_action_frame = ttk.Frame(self.tab_calibre)
+        calibre_action_frame = ttk.Frame(body)
         calibre_action_frame.pack(fill="x", padx=15, pady=10)
         self.calibre_send_btn = ttk.Button(calibre_action_frame, text="★ 선택한 도서 X3 기기로 즉시 전송 (다중 선택 가능)", command=self._send_calibre_books)
         self.calibre_send_btn.pack(fill="x", pady=5)
 
     # ── 탭 3: 동기화 이력 ───────────────────────────────────────────
     def _build_tab_history(self):
-        ctrl_frame = ttk.Frame(self.tab_history)
-        ctrl_frame.pack(fill="x", padx=15, pady=8)
-        ttk.Button(ctrl_frame, text="🔄 이력 새로고침", command=self._refresh_history).pack(side="left", padx=3)
-        ttk.Button(ctrl_frame, text="🗑 선택 항목 삭제 (재전송 허용)", command=self._delete_history_entry).pack(side="left", padx=3)
-        ttk.Button(ctrl_frame, text="⚠️ 전체 이력 초기화", command=self._clear_all_history).pack(side="left", padx=3)
-        self.history_count_label = ttk.Label(ctrl_frame, text="", foreground=self.YELLOW_COLOR)
-        self.history_count_label.pack(side="right", padx=10)
+        body = self._create_scrollable_frame(self.tab_history)
 
-        hist_frame = ttk.LabelFrame(self.tab_history, text=" 전송 완료된 포스트 목록 (최신 200건) ")
-        hist_frame.pack(fill="both", expand=True, padx=15, pady=5)
+        ctrl_frame = ttk.Frame(body)
+        ctrl_frame.pack(fill="x", padx=15, pady=8)
+
+        btn_row = ttk.Frame(ctrl_frame)
+        btn_row.pack(fill="x")
+        ttk.Button(btn_row, text="🔄 이력 새로고침", command=self._refresh_history).pack(side="left", padx=3)
+        ttk.Button(btn_row, text="🗑 선택 항목 삭제 (재전송 허용)", command=self._delete_history_entry).pack(side="left", padx=3)
+        ttk.Button(btn_row, text="⚠️ 전체 이력 초기화", command=self._clear_all_history).pack(side="left", padx=3)
+
+        self.history_count_label = ttk.Label(ctrl_frame, text="", foreground=self.YELLOW_COLOR)
+        self.history_count_label.pack(anchor="e", padx=10, pady=(4, 0))
+
+        hist_frame = ttk.LabelFrame(body, text=" 전송 완료된 포스트 목록 (최신 200건) ")
+        hist_frame.pack(fill="x", padx=15, pady=5)
 
         h_columns = ("site", "title", "synced_at", "url")
-        self.hist_tree = ttk.Treeview(hist_frame, columns=h_columns, show="headings", selectmode="extended")
+        self.hist_tree = ttk.Treeview(hist_frame, columns=h_columns, show="headings", selectmode="extended", height=10)
         self.hist_tree.heading("site", text="사이트")
         self.hist_tree.heading("title", text="제목")
         self.hist_tree.heading("synced_at", text="전송 시각")
         self.hist_tree.heading("url", text="URL")
-        self.hist_tree.column("site", width=120, anchor="w")
-        self.hist_tree.column("title", width=280, anchor="w")
-        self.hist_tree.column("synced_at", width=150, anchor="center")
-        self.hist_tree.column("url", width=250, anchor="w")
-        self.hist_tree.pack(side="left", fill="both", expand=True, padx=10, pady=8)
-
-        h_scroll = ttk.Scrollbar(hist_frame, orient="vertical", command=self.hist_tree.yview)
-        self.hist_tree.configure(yscrollcommand=h_scroll.set)
-        h_scroll.pack(side="right", fill="y", padx=(0, 10), pady=8)
+        self.hist_tree.column("site", width=120, minwidth=80, anchor="w")
+        self.hist_tree.column("title", width=280, minwidth=120, anchor="w")
+        self.hist_tree.column("synced_at", width=150, minwidth=100, anchor="center")
+        self.hist_tree.column("url", width=250, minwidth=120, anchor="w")
+        self._mount_tree_with_scrollbars(hist_frame, self.hist_tree)
+        self.hist_tree.bind("<Double-1>", self._on_history_double_click)
 
     # ── 탭 4: 서버 & 고급 설정 ────────────────────────────────────
     def _build_tab_server(self):
+        body = self._create_scrollable_frame(self.tab_server)
+
         # OPDS 서버
-        opds_frame = ttk.LabelFrame(self.tab_server, text=" 📡 OPDS 카탈로그 서버 ")
+        opds_frame = ttk.LabelFrame(body, text=" 📡 OPDS 카탈로그 서버 ")
         opds_frame.pack(fill="x", padx=15, pady=10)
+        opds_frame.columnconfigure(4, weight=1)
         ttk.Label(opds_frame, text="포트:").grid(row=0, column=0, padx=10, pady=8, sticky="w")
         self.opds_port_sp = ttk.Spinbox(opds_frame, from_=1024, to=65535, width=6)
         self.opds_port_sp.grid(row=0, column=1, padx=5, pady=8, sticky="w")
@@ -301,15 +466,19 @@ class SyncAppGui:
         self.opds_status_label = ttk.Label(opds_frame, text="중지됨", foreground=self.RED_COLOR)
         self.opds_status_label.grid(row=0, column=3, padx=10, pady=8, sticky="w")
         self.opds_url_label = ttk.Label(opds_frame, text="", foreground=self.ACCENT_COLOR, cursor="hand2")
-        self.opds_url_label.grid(row=0, column=4, padx=10, pady=8, sticky="w")
+        self.opds_url_label.grid(row=1, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
         self.opds_url_label.bind("<Button-1>", lambda e: self._open_url(self.opds_url_label.cget("text")))
         self.opds_allow_lan_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opds_frame, text="LAN 공개 (0.0.0.0)", variable=self.opds_allow_lan_var).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 8), sticky="w")
-        ttk.Label(opds_frame, text="기본은 localhost만 허용. LAN 공개 시 같은 네트워크에서 EPUB 다운로드 가능.", font=("Malgun Gothic", 8), foreground="#6c757d").grid(row=2, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        ttk.Checkbutton(opds_frame, text="LAN 공개 (0.0.0.0)", variable=self.opds_allow_lan_var, command=self._save_ui_settings).grid(row=2, column=0, columnspan=2, padx=10, pady=(0, 4), sticky="w")
+        ttk.Label(opds_frame, text="기본은 localhost만 허용. LAN 공개 시 API 키 인증 필요.", font=("Malgun Gothic", 8), foreground=self.HINT_COLOR).grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
+        self.opds_api_key_label = ttk.Label(opds_frame, text="", font=("Consolas", 8), foreground=self.HINT_COLOR)
+        self.opds_api_key_label.grid(row=4, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        self._bind_autosave(self.opds_port_sp)
 
         # 웹 대시보드
-        web_frame = ttk.LabelFrame(self.tab_server, text=" 🌐 웹 대시보드 ")
+        web_frame = ttk.LabelFrame(body, text=" 🌐 웹 대시보드 ")
         web_frame.pack(fill="x", padx=15, pady=5)
+        web_frame.columnconfigure(4, weight=1)
         ttk.Label(web_frame, text="포트:").grid(row=0, column=0, padx=10, pady=8, sticky="w")
         self.web_port_sp = ttk.Spinbox(web_frame, from_=1024, to=65535, width=6)
         self.web_port_sp.grid(row=0, column=1, padx=5, pady=8, sticky="w")
@@ -319,27 +488,30 @@ class SyncAppGui:
         self.web_status_label = ttk.Label(web_frame, text="중지됨", foreground=self.RED_COLOR)
         self.web_status_label.grid(row=0, column=3, padx=10, pady=8, sticky="w")
         self.web_url_label = ttk.Label(web_frame, text="", foreground=self.ACCENT_COLOR, cursor="hand2")
-        self.web_url_label.grid(row=0, column=4, padx=10, pady=8, sticky="w")
+        self.web_url_label.grid(row=1, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
         self.web_url_label.bind("<Button-1>", lambda e: self._open_url(self.web_url_label.cget("text")))
         self.web_allow_lan_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(web_frame, text="LAN 공개 (0.0.0.0)", variable=self.web_allow_lan_var).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 8), sticky="w")
-        self.web_token_label = ttk.Label(web_frame, text="", font=("Consolas", 8), foreground="#6c757d")
-        self.web_token_label.grid(row=2, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        ttk.Checkbutton(web_frame, text="LAN 공개 (0.0.0.0)", variable=self.web_allow_lan_var, command=self._save_ui_settings).grid(row=2, column=0, columnspan=2, padx=10, pady=(0, 4), sticky="w")
+        self.web_token_label = ttk.Label(web_frame, text="", font=("Consolas", 8), foreground=self.HINT_COLOR)
+        self.web_token_label.grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        self._bind_autosave(self.web_port_sp)
 
         # Calibre Watch
-        watch_frame = ttk.LabelFrame(self.tab_server, text=" 👁 Calibre 서재 자동 감시 (새 파일 추가 시 자동 전송) ")
+        watch_frame = ttk.LabelFrame(body, text=" 👁 Calibre 서재 자동 감시 (새 파일 추가 시 자동 전송) ")
         watch_frame.pack(fill="x", padx=15, pady=5)
+        watch_frame.columnconfigure(1, weight=1)
         ttk.Label(watch_frame, text="감시 폴더:").grid(row=0, column=0, padx=10, pady=8, sticky="w")
-        self.watch_dir_entry = ttk.Entry(watch_frame, width=45)
+        self.watch_dir_entry = ttk.Entry(watch_frame)
         self.watch_dir_entry.grid(row=0, column=1, padx=5, pady=8, sticky="we")
         ttk.Button(watch_frame, text="폴더 선택", command=self._browse_watch_dir).grid(row=0, column=2, padx=5, pady=8)
         self.watch_start_btn = ttk.Button(watch_frame, text="▶ 감시 시작", command=self._toggle_watch)
         self.watch_start_btn.grid(row=0, column=3, padx=5, pady=8)
         self.watch_status_label = ttk.Label(watch_frame, text="감시 중지됨", foreground=self.RED_COLOR)
         self.watch_status_label.grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 8), sticky="w")
+        self._bind_autosave(self.watch_dir_entry)
 
         # AI 요약 설정
-        ai_frame = ttk.LabelFrame(self.tab_server, text=" 🤖 AI 기사 요약 설정 (선택) ")
+        ai_frame = ttk.LabelFrame(body, text=" 🤖 AI 기사 요약 설정 (선택) ")
         ai_frame.pack(fill="x", padx=15, pady=5)
 
         self.ai_enabled_var = tk.BooleanVar()
@@ -357,7 +529,7 @@ class SyncAppGui:
         ttk.Button(ai_frame, text="저장", command=self._save_ai_settings).grid(row=1, column=3, padx=10, pady=6)
 
         # 번역 설정
-        trans_frame = ttk.LabelFrame(self.tab_server, text=" 🌐 번역 설정 (선택) ")
+        trans_frame = ttk.LabelFrame(body, text=" 🌐 번역 설정 (선택) ")
         trans_frame.pack(fill="x", padx=15, pady=5)
 
         self.trans_enabled_var = tk.BooleanVar()
@@ -369,36 +541,54 @@ class SyncAppGui:
         self.trans_provider_cb.set("googletrans")
 
         ttk.Button(trans_frame, text="저장", command=self._save_trans_settings).grid(row=0, column=3, padx=10, pady=6)
-        ttk.Label(trans_frame, text="※ googletrans: 사이트별 '번역'만 설정해도 동작. libretranslate: 전역 활성화 필요.", font=("Malgun Gothic", 8), foreground="#6c757d").grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 6), sticky="w")
+        ttk.Label(trans_frame, text="※ googletrans: 사이트별 '번역'만 설정해도 동작. libretranslate: 전역 활성화 필요.", font=("Malgun Gothic", 8), foreground=self.HINT_COLOR).grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 6), sticky="w")
 
         # 로그 폴더 열기
-        log_frame = ttk.LabelFrame(self.tab_server, text=" 📂 로그 파일 ")
+        log_frame = ttk.LabelFrame(body, text=" 📂 로그 파일 ")
         log_frame.pack(fill="x", padx=15, pady=5)
         ttk.Button(log_frame, text="📂 로그 폴더 열기", command=self._open_log_folder).pack(side="left", padx=10, pady=8)
-        ttk.Label(log_frame, text="logs/ 폴더에 날짜별 sync_YYYY-MM-DD.log 파일이 저장됩니다.", font=("Malgun Gothic", 8), foreground="#a6adc8").pack(side="left", padx=5, pady=8)
+        ttk.Label(log_frame, text="logs/ 폴더에 날짜별 sync_YYYY-MM-DD.log 파일이 저장됩니다.", font=("Malgun Gothic", 8), foreground=self.HINT_COLOR).pack(side="left", padx=5, pady=8)
 
     # ── 하단 공통 바 ──────────────────────────────────────────────
-    def _build_bottom_bar(self):
-        sync_run_frame = ttk.Frame(self.root)
-        sync_run_frame.pack(fill="x", padx=15, pady=2)
+    def _build_bottom_bar(self, parent):
+        sync_run_frame = ttk.Frame(parent)
+        sync_run_frame.pack(fill="x", padx=5, pady=2)
 
         self.sync_now_btn = ttk.Button(sync_run_frame, text="🚀 즉시 전체 뉴스 스크래핑 및 X3 동기화 실행", command=self._run_immediate_sync)
         self.sync_now_btn.pack(fill="x", pady=3)
 
         # 진행률 표시바
-        self.progress_bar = ttk.Progressbar(self.root, orient="horizontal", mode="determinate", style="TProgressbar")
-        self.progress_bar.pack(fill="x", padx=15, pady=(0, 2))
+        self.progress_bar = ttk.Progressbar(parent, orient="horizontal", mode="determinate", style="TProgressbar")
+        self.progress_bar.pack(fill="x", padx=5, pady=(0, 2))
 
-        log_frame = ttk.LabelFrame(self.root, text=" 프로그램 상태 및 동기화 로그 ")
-        log_frame.pack(fill="both", expand=False, padx=15, pady=(2, 10))
+        log_frame = ttk.LabelFrame(parent, text=" 프로그램 상태 및 동기화 로그 ")
+        log_frame.pack(fill="both", expand=True, padx=5, pady=(2, 5))
 
-        self.log_txt = tk.Text(log_frame, height=6, bg=self.TEXT_BG, fg=self.FG_COLOR, insertbackground=self.FG_COLOR, font=("Consolas", 9))
-        self.log_txt.pack(fill="both", expand=True, padx=8, pady=8)
+        log_inner = ttk.Frame(log_frame)
+        log_inner.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.log_txt = tk.Text(log_inner, height=6, bg=self.TEXT_BG, fg=self.FG_COLOR, insertbackground=self.FG_COLOR, font=("Consolas", 9), wrap="word")
+        self.log_txt.pack(side="left", fill="both", expand=True)
+
+        log_scroll = ttk.Scrollbar(log_inner, orient="vertical", command=self.log_txt.yview)
+        self.log_txt.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side="right", fill="y")
         self.log_txt.config(state="disabled")
+        self._bind_text_mousewheel(self.log_txt)
 
     # ------------------------------------------------------------------
     # 내부 유틸
     # ------------------------------------------------------------------
+    def _on_history_double_click(self, _event=None):
+        selected = self.hist_tree.selection()
+        if not selected:
+            return
+        url = self._history_url_by_iid.get(selected[0], "")
+        if not url:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(url)
+        self._log_message(f"📋 URL 복사됨: {url[:80]}{'...' if len(url) > 80 else ''}")
     def _log_message(self, message: str):
         self.log_txt.config(state="normal")
         self.log_txt.insert(tk.END, message + "\n")
@@ -426,6 +616,47 @@ class SyncAppGui:
     def _make_progress_callback(self):
         return lambda cur, tot: self.root.after(0, lambda c=cur, t=tot: self._update_progress(c, t))
 
+    def _make_uploader(self) -> X3Uploader:
+        """기본 기기 + x3_devices 전체에 전송할 업로더를 생성합니다."""
+        config = self.service.config
+        return X3Uploader(
+            config.get("x3_ip", "").strip() or self.ip_entry.get().strip(),
+            config.get("x3_devices", []),
+        )
+
+    @staticmethod
+    def _summarize_upload_results(results: dict) -> tuple[bool, bool, str]:
+        """(전체 성공, 일부 성공, 로그용 요약 문자열) 반환"""
+        if not results:
+            return False, False, "등록된 기기 없음"
+        ok_names = [n for n, ok in results.items() if ok]
+        fail_names = [n for n, ok in results.items() if not ok]
+        parts = []
+        if ok_names:
+            parts.append(f"성공: {', '.join(ok_names)}")
+        if fail_names:
+            parts.append(f"실패: {', '.join(fail_names)}")
+        return all(results.values()), bool(ok_names), " | ".join(parts)
+
+    def _get_log_for_web(self) -> str:
+        try:
+            content = self.log_txt.get("1.0", "end-1c")
+            if content.strip():
+                lines = content.splitlines()
+                return "\n".join(lines[-100:])
+        except Exception:
+            pass
+        log_dir = get_log_dir()
+        if os.path.isdir(log_dir):
+            files = sorted(os.listdir(log_dir), reverse=True)
+            if files:
+                try:
+                    with open(os.path.join(log_dir, files[0]), "r", encoding="utf-8") as f:
+                        return "".join(f.readlines()[-100:])
+                except Exception:
+                    pass
+        return ""
+
     # ------------------------------------------------------------------
     # 설정 로드 / 저장
     # ------------------------------------------------------------------
@@ -434,6 +665,7 @@ class SyncAppGui:
         self.ip_entry.insert(0, config.get("x3_ip", "crosspoint.local"))
         self.dir_entry.insert(0, config.get("output_dir", "./output"))
         self.calibre_entry.insert(0, config.get("calibre_path", "C:\\Program Files\\Calibre2\\calibredb.exe"))
+        self.calibre_lib_entry.insert(0, config.get("calibre_library_path", ""))
         self.font_cb.set(config.get("font_family", "serif"))
         self.font_size_sp.set(str(config.get("font_size", 16)))
         self.line_height_sp.set(str(config.get("line_height", 1.7)))
@@ -447,6 +679,10 @@ class SyncAppGui:
         opds_conf = config.get("opds_server", {})
         self.opds_port_sp.set(str(opds_conf.get("port", 8765)))
         self.opds_allow_lan_var.set(opds_conf.get("allow_lan", False))
+        opds_key = opds_conf.get("api_key", "")
+        self.opds_api_key_label.config(
+            text=f"OPDS API 키: {opds_key[:8]}... (config.json, LAN 시 X-Api-Key 헤더)" if opds_key else ""
+        )
 
         web_conf = config.get("web_dashboard", {})
         self.web_port_sp.set(str(web_conf.get("port", 8766)))
@@ -481,6 +717,7 @@ class SyncAppGui:
         config["x3_ip"] = self.ip_entry.get().strip()
         config["output_dir"] = self.dir_entry.get().strip()
         config["calibre_path"] = self.calibre_entry.get().strip()
+        config["calibre_library_path"] = self.calibre_lib_entry.get().strip()
         config["font_family"] = self.font_cb.get()
         config["epub_cover"] = self.cover_var.get()
         try:
@@ -503,8 +740,10 @@ class SyncAppGui:
             config["web_dashboard"]["allow_lan"] = self.web_allow_lan_var.get()
         except ValueError:
             pass
+        config.setdefault("calibre_watch", {})["watch_dir"] = self.watch_dir_entry.get().strip()
         self.service.config_manager.save_config(config)
         self.calibre.calibre_path = config["calibre_path"]
+        self.calibre.library_path = config["calibre_library_path"]
         self.service._reload_config()
 
     def _save_ai_settings(self):
@@ -553,11 +792,19 @@ class SyncAppGui:
             self.calibre_entry.insert(0, f)
             self._save_ui_settings()
 
+    def _browse_calibre_library(self):
+        d = filedialog.askdirectory(title="Calibre 라이브러리 폴더 선택 (metadata.db가 있는 폴더)")
+        if d:
+            self.calibre_lib_entry.delete(0, tk.END)
+            self.calibre_lib_entry.insert(0, d)
+            self._save_ui_settings()
+
     def _browse_watch_dir(self):
         d = filedialog.askdirectory(title="감시할 Calibre 라이브러리 폴더 선택")
         if d:
             self.watch_dir_entry.delete(0, tk.END)
             self.watch_dir_entry.insert(0, d)
+            self._save_ui_settings()
 
     def _open_output_folder(self):
         """출력 폴더를 탐색기로 엽니다."""
@@ -594,15 +841,24 @@ class SyncAppGui:
     def _test_connection(self):
         ip = self.ip_entry.get().strip()
         self.conn_status_label.config(text="연결 중...", foreground=self.YELLOW_COLOR)
-        self.root.update_idletasks()
-        if X3Uploader(ip).test_connection():
+        self.test_conn_btn.config(state="disabled")
+
+        def task():
+            ok = X3Uploader(ip).test_connection()
+            self.root.after(0, lambda: self._test_connection_finished(ok))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _test_connection_finished(self, ok: bool):
+        if not self._sync_busy:
+            self.test_conn_btn.config(state="normal")
+        if ok:
             self.conn_status_label.config(text="연결 성공 ✅", foreground=self.GREEN_COLOR)
         else:
             self.conn_status_label.config(text="연결 실패 ❌", foreground=self.RED_COLOR)
 
     def _direct_upload(self):
         file_path = self.file_entry.get().strip()
-        ip = self.ip_entry.get().strip()
         if not file_path or not os.path.exists(file_path):
             messagebox.showwarning("경고", "올바른 파일 경로를 지정해 주세요.")
             return
@@ -611,19 +867,26 @@ class SyncAppGui:
         self.direct_upload_btn.config(state="disabled")
 
         def task():
-            success = X3Uploader(ip).upload(file_path)
-            self.root.after(0, lambda: self._direct_upload_finished(success, file_path))
+            results = self._make_uploader().upload_to_targets(file_path)
+            self.root.after(0, lambda: self._direct_upload_finished(results, file_path))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _direct_upload_finished(self, success: bool, file_path: str):
-        self.direct_upload_btn.config(state="normal")
-        if success:
-            self._log_message(f"🎉 파일 전송 성공: {os.path.basename(file_path)}")
-            ToastNotifier.show_toast("파일 업로드 성공", f"'{os.path.basename(file_path)}' 전송 완료.")
-            messagebox.showinfo("완료", "기기로 전송이 완료되었습니다.")
+    def _direct_upload_finished(self, results: dict, file_path: str):
+        if not self._sync_busy:
+            self.direct_upload_btn.config(state="normal")
+        all_ok, any_ok, summary = self._summarize_upload_results(results)
+        basename = os.path.basename(file_path)
+        if all_ok:
+            self._log_message(f"🎉 파일 전송 성공 ({basename}): {summary}")
+            ToastNotifier.show_toast("파일 업로드 성공", f"'{basename}' 전송 완료.")
+            messagebox.showinfo("완료", f"모든 기기로 전송 완료.\n{summary}")
+        elif any_ok:
+            self._log_message(f"⚠️ 파일 부분 전송 ({basename}): {summary}")
+            ToastNotifier.show_toast("파일 부분 업로드", summary, is_error=True)
+            messagebox.showwarning("부분 성공", f"일부 기기만 전송되었습니다.\n{summary}")
         else:
-            self._log_message(f"❌ 파일 전송 실패: {os.path.basename(file_path)}")
+            self._log_message(f"❌ 파일 전송 실패 ({basename}): {summary}")
             ToastNotifier.show_toast("파일 업로드 실패", "기기 전송 오류. 연결 상태 확인 요망.", is_error=True)
             messagebox.showerror("오류", "기기로 전송하지 못했습니다.")
 
@@ -662,6 +925,7 @@ class SyncAppGui:
     def _test_and_load_calibre(self, silent=False):
         self._save_ui_settings()
         self.calibre.calibre_path = self.calibre_entry.get().strip()
+        self.calibre.library_path = self.calibre_lib_entry.get().strip()
         if not silent:
             self._log_message("📚 Calibre 연결 확인 중...")
             self.calibre_conn_btn.config(state="disabled")
@@ -669,12 +933,14 @@ class SyncAppGui:
             if not silent:
                 self._log_message("❌ Calibre 연동 실패: 경로를 확인하세요.")
                 messagebox.showerror("Calibre 연동 실패", "calibredb.exe 경로를 찾지 못했습니다.")
-                self.calibre_conn_btn.config(state="normal")
+                if not self._sync_busy:
+                    self.calibre_conn_btn.config(state="normal")
             return
         threading.Thread(target=lambda: self.root.after(0, lambda: self._show_calibre_books(self.calibre.list_books(), silent)), daemon=True).start()
 
     def _show_calibre_books(self, books: list, silent: bool):
-        self.calibre_conn_btn.config(state="normal")
+        if not self._sync_busy:
+            self.calibre_conn_btn.config(state="normal")
         for item in self.calibre_tree.get_children():
             self.calibre_tree.delete(item)
         if not books:
@@ -695,13 +961,12 @@ class SyncAppGui:
             messagebox.showwarning("선택 누락", "전송할 도서를 선택해 주세요.")
             return
         self._save_ui_settings()
-        ip = self.ip_entry.get().strip()
         self.calibre_send_btn.config(state="disabled")
         self._log_message(f"\n=== Calibre 책 {len(selected_items)}권 무선 전송 시작 ===")
 
         def task():
             success_cnt = 0
-            uploader = X3Uploader(ip)
+            uploader = self._make_uploader()
             for item_id in selected_items:
                 book_id = int(item_id)
                 file_path = self.calibre.get_book_file_path(book_id)
@@ -709,17 +974,23 @@ class SyncAppGui:
                     self.root.after(0, lambda b=book_id: self._log_message(f"❌ [책 ID {b}] 파일 경로 조회 실패"))
                     continue
                 self.root.after(0, lambda p=file_path: self._log_message(f"📡 전송 중: {os.path.basename(p)}"))
-                if uploader.upload(file_path):
-                    self.root.after(0, lambda p=file_path: self._log_message(f"🎉 성공: {os.path.basename(p)}"))
+                results = uploader.upload_to_targets(file_path)
+                all_ok, any_ok, summary = self._summarize_upload_results(results)
+                if all_ok:
+                    self.root.after(0, lambda p=file_path, s=summary: self._log_message(f"🎉 성공: {os.path.basename(p)} ({s})"))
+                    success_cnt += 1
+                elif any_ok:
+                    self.root.after(0, lambda p=file_path, s=summary: self._log_message(f"⚠️ 부분 성공: {os.path.basename(p)} ({s})"))
                     success_cnt += 1
                 else:
-                    self.root.after(0, lambda p=file_path: self._log_message(f"❌ 실패: {os.path.basename(p)}"))
+                    self.root.after(0, lambda p=file_path, s=summary: self._log_message(f"❌ 실패: {os.path.basename(p)} ({s})"))
             self.root.after(0, lambda: self._calibre_send_finished(success_cnt, len(selected_items)))
 
         threading.Thread(target=task, daemon=True).start()
 
     def _calibre_send_finished(self, success_cnt: int, total_cnt: int):
-        self.calibre_send_btn.config(state="normal")
+        if not self._sync_busy:
+            self.calibre_send_btn.config(state="normal")
         self._log_message(f"=== Calibre 도서 전송 종료: {success_cnt}/{total_cnt} 성공 ===\n")
         if success_cnt > 0:
             ToastNotifier.show_toast("Calibre 도서 동기화", f"{success_cnt}권 전송 완료.")
@@ -741,9 +1012,8 @@ class SyncAppGui:
     def _add_device_popup(self):
         dialog = tk.Toplevel(self.root)
         dialog.title("X3 기기 추가")
-        dialog.geometry("360x160")
-        dialog.resizable(False, False)
-        dialog.grab_set()
+        dialog.configure(bg=self.BG_COLOR)
+        self._setup_dialog(dialog, 360, 180)
         frame = ttk.Frame(dialog, padding=15)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="기기 이름:").grid(row=0, column=0, sticky="w", pady=6)
@@ -841,28 +1111,30 @@ class SyncAppGui:
     def _open_site_dialog(self, title: str, idx: int = None, site_data: dict = None):
         dialog = tk.Toplevel(self.root)
         dialog.title(title)
-        dialog.geometry("560x540")
-        dialog.resizable(False, False)
         dialog.configure(bg=self.BG_COLOR)
-        dialog.grab_set()
+        self._setup_dialog(dialog, 560, 540)
 
-        frame = ttk.Frame(dialog)
-        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        content = ttk.Frame(dialog)
+        content.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="사이트 이름:").grid(row=0, column=0, sticky="w", pady=8)
-        name_entry = ttk.Entry(frame, width=40)
+        frame = self._create_scrollable_frame(content)
+        form = ttk.Frame(frame)
+        form.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ttk.Label(form, text="사이트 이름:").grid(row=0, column=0, sticky="w", pady=8)
+        name_entry = ttk.Entry(form, width=40)
         name_entry.grid(row=0, column=1, sticky="w", pady=8)
 
-        ttk.Label(frame, text="타입 (유형):").grid(row=1, column=0, sticky="w", pady=8)
-        type_cb = ttk.Combobox(frame, values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack"], state="readonly", width=12)
+        ttk.Label(form, text="타입 (유형):").grid(row=1, column=0, sticky="w", pady=8)
+        type_cb = ttk.Combobox(form, values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack"], state="readonly", width=12)
         type_cb.grid(row=1, column=1, sticky="w", pady=8)
         type_cb.set("css")
 
-        ttk.Label(frame, text="수집 주소(URL):").grid(row=2, column=0, sticky="w", pady=8)
-        url_entry = ttk.Entry(frame, width=40)
+        ttk.Label(form, text="수집 주소(URL):").grid(row=2, column=0, sticky="w", pady=8)
+        url_entry = ttk.Entry(form, width=40)
         url_entry.grid(row=2, column=1, sticky="w", pady=8)
 
-        css_frame = ttk.LabelFrame(frame, text=" CSS 선택자 설정 (CSS 타입 전용) ")
+        css_frame = ttk.LabelFrame(form, text=" CSS 선택자 설정 (CSS 타입 전용) ")
         css_frame.grid(row=3, column=0, columnspan=2, sticky="we", pady=10, ipady=5)
 
         ttk.Label(css_frame, text="아이템 컨테이너:").grid(row=0, column=0, sticky="w", padx=10, pady=5)
@@ -880,17 +1152,17 @@ class SyncAppGui:
         content_entry.grid(row=2, column=1, sticky="w", pady=5)
         content_entry.insert(0, ".post-content")
 
-        ttk.Label(frame, text="불필요 요소 제거 CSS:").grid(row=4, column=0, sticky="w", pady=8)
-        remove_entry = ttk.Entry(frame, width=40)
+        ttk.Label(form, text="불필요 요소 제거 CSS:").grid(row=4, column=0, sticky="w", pady=8)
+        remove_entry = ttk.Entry(form, width=40)
         remove_entry.grid(row=4, column=1, sticky="w", pady=8)
 
-        ttk.Label(frame, text="최대 수집 개수:").grid(row=5, column=0, sticky="w", pady=8)
-        limit_entry = ttk.Entry(frame, width=10)
+        ttk.Label(form, text="최대 수집 개수:").grid(row=5, column=0, sticky="w", pady=8)
+        limit_entry = ttk.Entry(form, width=10)
         limit_entry.grid(row=5, column=1, sticky="w", pady=8)
         limit_entry.insert(0, "5")
 
         # 이미지 포함 / 번역 옵션
-        opt_frame = ttk.Frame(frame)
+        opt_frame = ttk.Frame(form)
         opt_frame.grid(row=6, column=0, columnspan=2, sticky="we", pady=5)
         include_img_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="이미지 포함", variable=include_img_var).pack(side="left", padx=5)
@@ -899,7 +1171,7 @@ class SyncAppGui:
         translate_cb = ttk.Combobox(opt_frame, values=["", "ko", "en", "ja", "zh-cn", "zh-tw"], width=6)
         translate_cb.pack(side="left")
         translate_cb.set("")
-        ttk.Label(opt_frame, text="(빈값=번역안함)", font=("Malgun Gothic", 8), foreground="#a6adc8").pack(side="left", padx=3)
+        ttk.Label(opt_frame, text="(빈값=번역안함)", font=("Malgun Gothic", 8), foreground=self.HINT_COLOR).pack(side="left", padx=3)
 
         def on_type_change(event=None):
             t = type_cb.get()
@@ -927,6 +1199,9 @@ class SyncAppGui:
             url = url_entry.get().strip()
             if not name or not url:
                 messagebox.showerror("오류", "이름과 수집 주소는 필수값입니다.", parent=dialog)
+                return
+            if not (url.startswith("http://") or url.startswith("https://")):
+                messagebox.showerror("오류", "수집 주소는 http:// 또는 https://로 시작해야 합니다.", parent=dialog)
                 return
             try:
                 limit = int(limit_entry.get().strip())
@@ -1011,8 +1286,18 @@ class SyncAppGui:
             except ValueError:
                 port = 8765
             output_dir = resolve_path(self.dir_entry.get().strip() or "./output")
-            bind_host = "0.0.0.0" if self.opds_allow_lan_var.get() else "127.0.0.1"
-            self._opds_server = OPDSServer(output_dir=output_dir, port=port, bind_host=bind_host)
+            allow_lan = self.opds_allow_lan_var.get()
+            bind_host = "0.0.0.0" if allow_lan else "127.0.0.1"
+            config = self.service.config_manager.load_config()
+            opds_conf = config.get("opds_server", {})
+            api_key = opds_conf.get("api_key", "")
+            self._opds_server = OPDSServer(
+                output_dir=output_dir,
+                port=port,
+                bind_host=bind_host,
+                api_key=api_key,
+                require_auth=allow_lan,
+            )
             if self._opds_server.start():
                 self.opds_start_btn.config(text="■ 서버 중지")
                 self.opds_status_label.config(text="실행 중 ✅", foreground=self.GREEN_COLOR)
@@ -1048,7 +1333,9 @@ class SyncAppGui:
                 bind_host=bind_host,
                 api_token=api_token,
                 sync_callback=sync_cb,
+                get_log_callback=self._get_log_for_web,
                 pipeline_busy_callback=self.service.is_pipeline_running,
+                get_status_callback=self.service.get_last_pipeline_result,
             )
             if self._web_dashboard.start():
                 self.web_start_btn.config(text="■ 서버 중지")
@@ -1070,13 +1357,17 @@ class SyncAppGui:
             if not watch_dir or not os.path.isdir(watch_dir):
                 messagebox.showerror("오류", "유효한 감시 폴더를 선택해 주세요.")
                 return
-            ip = self.ip_entry.get().strip()
-
             def on_new_file(fpath: str):
                 self._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 자동 전송 시작")
                 def upload_task():
-                    ok = X3Uploader(ip).upload(fpath)
-                    msg = f"🎉 자동 전송 성공: {os.path.basename(fpath)}" if ok else f"❌ 자동 전송 실패: {os.path.basename(fpath)}"
+                    results = self._make_uploader().upload_to_targets(fpath)
+                    all_ok, any_ok, summary = self._summarize_upload_results(results)
+                    if all_ok:
+                        msg = f"🎉 자동 전송 성공: {os.path.basename(fpath)} ({summary})"
+                    elif any_ok:
+                        msg = f"⚠️ 자동 부분 전송: {os.path.basename(fpath)} ({summary})"
+                    else:
+                        msg = f"❌ 자동 전송 실패: {os.path.basename(fpath)} ({summary})"
                     self.root.after(0, lambda m=msg: self._log_message(m))
                 threading.Thread(target=upload_task, daemon=True).start()
 
@@ -1097,7 +1388,7 @@ class SyncAppGui:
     # ------------------------------------------------------------------
     def _run_immediate_sync(self):
         self._save_ui_settings()
-        self.sync_now_btn.config(state="disabled")
+        self._set_sync_ui_busy(True)
         self.progress_bar["value"] = 0
         self._log_message("\n=== 동기화 실행 요청 받음 ===")
 
@@ -1111,8 +1402,13 @@ class SyncAppGui:
         threading.Thread(target=run, daemon=True).start()
 
     def _sync_finished_ui(self):
-        self.sync_now_btn.config(state="normal")
-        self.progress_bar["value"] = 0
+        maximum = float(self.progress_bar["maximum"] or 0)
+        if maximum > 0:
+            self.progress_bar["value"] = maximum
+            self.root.after(1500, lambda: self.progress_bar.configure(value=0))
+        else:
+            self.progress_bar["value"] = 0
+        self._set_sync_ui_busy(False)
         self._log_message("=== 동기화 프로세스 종료 ===\n")
         self._refresh_history()
 

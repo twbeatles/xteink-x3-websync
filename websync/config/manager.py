@@ -1,9 +1,11 @@
 import os
 import json
 import secrets
+import shutil
 import threading
 import copy
 from websync.core.paths import PROJECT_ROOT, resolve_path
+from websync.config.exceptions import ConfigLoadError
 
 class ConfigManager:
     """설정 파일(config.json)의 로드 및 저장을 전담하는 클래스"""
@@ -23,11 +25,15 @@ class ConfigManager:
         "translate_to": "",
     }
 
+    CONFIG_VERSION = 2
+
     DEFAULT_CONFIG = {
+        "config_version": CONFIG_VERSION,
         "x3_ip": "crosspoint.local",
         "x3_devices": [],
         "output_dir": "./output",
         "calibre_path": "C:\\Program Files\\Calibre2\\calibredb.exe",
+        "calibre_library_path": "",
         "font_family": "serif",
         "font_size": 16,
         "line_height": 1.7,
@@ -78,7 +84,8 @@ class ConfigManager:
             "enabled": False,
             "port": 8765,
             "bind_host": "127.0.0.1",
-            "allow_lan": False
+            "allow_lan": False,
+            "api_key": ""
         },
         "web_dashboard": {
             "enabled": False,
@@ -139,6 +146,16 @@ class ConfigManager:
         web["api_token"] = secrets.token_urlsafe(24)
         return True
 
+    def _ensure_opds_api_key(self, config: dict) -> bool:
+        """OPDS LAN 공개용 API 키가 없으면 자동 생성합니다."""
+        opds = config.get("opds_server")
+        if not isinstance(opds, dict):
+            return False
+        if opds.get("api_key"):
+            return False
+        opds["api_key"] = secrets.token_urlsafe(16)
+        return True
+
     def load_config(self) -> dict:
         with self._lock:
             if not os.path.exists(self.config_path):
@@ -160,25 +177,58 @@ class ConfigManager:
                 if self._ensure_api_token(config):
                     updated = True
 
+                if self._ensure_opds_api_key(config):
+                    updated = True
+
+                if config.get("config_version", 0) < self.CONFIG_VERSION:
+                    config["config_version"] = self.CONFIG_VERSION
+                    updated = True
+
                 if updated:
                     self._save_config_unlocked(config)
                 return config
-            except Exception as e:
-                print(f"⚠️ 설정 로드 실패: {e}. 기본값을 사용합니다.")
-                return copy.deepcopy(self.DEFAULT_CONFIG)
+            except json.JSONDecodeError as e:
+                corrupt_path = f"{self.config_path}.corrupt"
+                try:
+                    shutil.copy2(self.config_path, corrupt_path)
+                except OSError:
+                    corrupt_path = None
+                raise ConfigLoadError(
+                    f"config.json 파싱 실패: {e}. 손상 파일을 '{corrupt_path}'에 보존했습니다.",
+                    corrupt_path=corrupt_path,
+                ) from e
+            except OSError as e:
+                raise ConfigLoadError(f"config.json 읽기 실패: {e}") from e
 
     def save_config(self, config_data: dict):
         with self._lock:
             self._save_config_unlocked(config_data)
 
     def _save_config_unlocked(self, config_data: dict):
-        """락이 이미 잡힌 상태에서 호출하는 내부 저장 전용 함수"""
+        """락이 이미 잡힌 상태에서 호출하는 내부 저장 전용 함수 (원자적 쓰기)"""
         try:
-            os.makedirs(os.path.dirname(self.config_path) or ".", exist_ok=True)
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            config_data.setdefault("config_version", self.CONFIG_VERSION)
+            directory = os.path.dirname(self.config_path) or "."
+            os.makedirs(directory, exist_ok=True)
+            tmp_path = f"{self.config_path}.tmp"
+            bak_path = f"{self.config_path}.bak"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            if os.path.exists(self.config_path):
+                try:
+                    shutil.copy2(self.config_path, bak_path)
+                except OSError:
+                    pass
+            os.replace(tmp_path, self.config_path)
         except Exception as e:
             print(f"❌ 설정 저장 실패: {e}")
+            if os.path.exists(f"{self.config_path}.tmp"):
+                try:
+                    os.remove(f"{self.config_path}.tmp")
+                except OSError:
+                    pass
 
     def get_resolved_output_dir(self, config: dict | None = None) -> str:
         cfg = config or self.load_config()

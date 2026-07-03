@@ -35,7 +35,7 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         'lxml', 'ebooklib', 'bs4', 'requests',
-        'websync', 'websync.core', 'websync.config', 'websync.db',
+        'websync', 'websync.core', 'websync.config', 'websync.config.exceptions', 'websync.db',
         'websync.scrapers', 'websync.scrapers.css', 'websync.scrapers.rss',
         'websync.scrapers.naver', 'websync.scrapers.tistory', 'websync.scrapers.brunch',
         'websync.scrapers.youtube', 'websync.scrapers.substack',

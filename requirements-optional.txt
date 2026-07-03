@@ -1,0 +1,6 @@
+# 선택 기능 의존성 (core pytest와 분리)
+-r requirements.txt
+Pillow>=10.0.0
+googletrans==4.0.0-rc1
+youtube-transcript-api>=0.6.0
+watchdog>=4.0.0

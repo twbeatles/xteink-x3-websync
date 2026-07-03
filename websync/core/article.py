@@ -11,5 +11,5 @@ def ensure_article_url(url: str, base_url: str, title: str) -> str:
     title = (title or "").strip()
     if not title:
         return ""
-    digest = hashlib.sha256(f"{base_url}:{title}".encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(f"{base_url}:{title}".encode("utf-8")).hexdigest()
     return f"synckey://{digest}"

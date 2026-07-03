@@ -1,8 +1,12 @@
 import os
+import sqlite3
 import tempfile
 import threading
 import time
-from websync.db.history import SyncHistoryDb
+
+import pytest
+
+from websync.db.history import SyncHistoryDb, SyncHistoryDbError
 
 
 def _make_db() -> tuple[SyncHistoryDb, str]:
@@ -44,5 +48,22 @@ def test_concurrent_access():
         for t in threads:
             t.join()
         assert db.get_count() == 20
+    finally:
+        _cleanup_db(db, path)
+
+
+def test_is_synced_raises_on_db_error():
+    from unittest.mock import patch
+
+    db, path = _make_db()
+    try:
+        db.mark_synced("https://example.com/x", "s", "t")
+
+        def bad_connect(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        with patch("websync.db.history.sqlite3.connect", side_effect=bad_connect):
+            with pytest.raises(SyncHistoryDbError):
+                db.is_synced("https://example.com/x")
     finally:
         _cleanup_db(db, path)

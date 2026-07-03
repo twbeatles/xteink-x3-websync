@@ -56,7 +56,7 @@ xteink-x3-websync/
 │   ├── watch/
 │   │   └── calibre.py         # Calibre 폴더 감시 (watchdog)
 │   └── gui/
-│       └── app.py             # Tkinter 다크 테마 GUI
+│       └── app.py             # Tkinter 라이트 테마 GUI (스크롤·PanedWindow)
 │
 ├── config.json                # 사용자 설정 (gitignore)
 ├── sync_history.db            # 전송 이력 DB (gitignore)
@@ -64,7 +64,9 @@ xteink-x3-websync/
 ├── logs/                      # 실행 로그 (gitignore)
 ├── tests/                     # pytest
 ├── scripts/                   # migrate_to_package.py, verify_migration.py
-├── requirements.txt
+├── requirements.txt           # 필수 + pytest
+├── requirements-optional.txt  # Pillow, googletrans, youtube, watchdog
+├── .github/workflows/test.yml # CI: pytest
 ├── README.md / PROJECT_AUDIT.md / CLAUDE.md
 ├── pyrightconfig.json
 └── .gitignore
@@ -80,16 +82,17 @@ xteink-x3-websync/
 |------|------|
 | 역할 | CLI `--sync` 플래그 분기 / GUI 앱 기동 |
 | 보안 패치 | `NullWriter` 클래스로 pythonw.exe stdout=None 방어 |
-| 다중 실행 방지 | `os.O_CREAT | os.O_WRONLY | os.O_EXCL` 기반 락 파일 (`/tmp/x3_websync_instance.lock`) |
-| 주의 | 락 파일은 `finally`에서 항상 해제됨 |
+| 다중 실행 방지 | GUI만 `tempfile.gettempdir()/x3_websync_instance.lock` 단일 인스턴스 락 |
+| `--sync` 모드 | GUI 락 없이 기동 — `SyncService._pipeline_lock`만으로 중복 실행 방지 |
+| 주의 | GUI 락은 `finally`에서 항상 해제됨 |
 
 **호출 관계**:
 ```
 main()
-  ├── acquire_instance_lock()
+  ├── [GUI만] acquire_instance_lock()
   ├── ConfigManager()
   ├── SyncService(config_manager)
-  └── [--sync] service.run_sync_pipeline()
+  └── [--sync] service.run_sync_pipeline() → sys.exit(0|1)
       [GUI]   SyncAppGui(service).run()
 ```
 
@@ -101,17 +104,22 @@ main()
 |------|------|
 | 역할 | `config.json` 로드·저장, 결손 키 자동 보강 |
 | 동시성 보호 | `threading.Lock()` 클래스 수준 락 |
-| 내부 메서드 | `_save_config_unlocked()` — 락 내부에서 호출하는 전용 저장 함수 |
+| 내부 메서드 | `_save_config_unlocked()` — 원자적 쓰기(tmp+bak+replace), `ConfigLoadError` |
+| 스키마 버전 | `config_version` (현재 2), 결손 키 자동 보강 |
 
 **설정 스키마** (`config.json`):
 ```json
 {
+  "config_version": 2,
   "x3_ip": "crosspoint.local",
+  "x3_devices": [{"name": "침실", "ip": "192.168.1.20"}],
   "output_dir": "./output",
   "calibre_path": "C:\\Program Files\\Calibre2\\calibredb.exe",
+  "calibre_library_path": "",
   "font_family": "serif",
   "font_size": 16,
   "line_height": 1.7,
+  "epub_cover": true,
   "sites": [
     {
       "name": "사이트명",
@@ -125,11 +133,12 @@ main()
       "enabled": true
     }
   ],
-  "schedule": {
-    "enabled": false,
-    "hour": "07",
-    "minute": "00"
-  }
+  "schedule": {"enabled": false, "hour": "07", "minute": "00"},
+  "ai_summary": {"enabled": false, "provider": "openai", "api_key": ""},
+  "translation": {"enabled": false, "provider": "googletrans"},
+  "opds_server": {"port": 8765, "allow_lan": false, "api_key": ""},
+  "web_dashboard": {"port": 8766, "allow_lan": false, "api_token": ""},
+  "calibre_watch": {"enabled": false, "watch_dir": ""}
 }
 ```
 
@@ -141,7 +150,8 @@ main()
 |------|------|
 | 역할 | 스크래핑 → 중복 필터 → EPUB 빌드 → 기기 업로드 전 과정 총괄 |
 | 중복 필터 | `SyncHistoryDb.is_synced(url)` 로 이미 보낸 기사 스킵 |
-| 결과 반환 | `bool` — True: 전송 성공 또는 신규 기사 없음 / False: 전송 실패 |
+| 결과 반환 | `bool` — True: 전 사이트 신규 없음·전체 전송 성공 / False: 오류·부분 실패·이미 실행 중 |
+| 상태 API | `get_last_pipeline_result()` — 웹 대시보드 `/api/status` 연동 |
 
 **파이프라인 흐름**:
 ```
@@ -150,10 +160,10 @@ run_sync_pipeline()
   2. enabled_sites 필터링
   3. for each site:
      a. ScraperFactory.get_scraper(type).fetch_articles(site)
-     b. [신규 기사] = is_synced() 필터링
+     b. [신규 기사] = is_synced() 필터링 (DB 오류 시 SyncHistoryDbError → 중단)
      c. EpubBuilder.build(name, new_articles) → epub_path
-     d. X3Uploader.upload(epub_path)
-     e. [성공 시] db.mark_synced(url, name, title)
+     d. X3Uploader.upload_to_targets(epub_path)  # 기본 + x3_devices
+     e. [1대 이상 성공 시] db.mark_synced(url, name, title)
   4. ToastNotifier.show_toast(결과)
 ```
 

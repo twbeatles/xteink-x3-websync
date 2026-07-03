@@ -1,14 +1,12 @@
-# 필수
+# 필수 (core 테스트는 이 목록만으로 통과)
 beautifulsoup4>=4.12.0
 ebooklib>=0.18
 requests>=2.31.0
 lxml>=5.0.0
-
-# 선택 (기능별)
-Pillow>=10.0.0          # EPUB 표지 자동 생성
-googletrans==4.0.0-rc1  # 사이트별 번역 (googletrans)
-youtube-transcript-api>=0.6.0  # YouTube 자막 스크래퍼
-watchdog>=4.0.0         # Calibre 폴더 감시
-
-# 개발/테스트
 pytest>=8.0.0
+
+# 선택 (기능별) — pip install -r requirements-optional.txt
+# Pillow>=10.0.0          # EPUB 표지 자동 생성
+# googletrans==4.0.0-rc1  # 사이트별 번역
+# youtube-transcript-api>=0.6.0  # YouTube 자막 스크래퍼
+# watchdog>=4.0.0         # Calibre 폴더 감시

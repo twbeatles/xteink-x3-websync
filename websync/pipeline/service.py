@@ -6,7 +6,7 @@ from websync.epub.builder import EpubBuilder
 from websync.upload.uploader import X3Uploader
 from websync.integrations.notifier import ToastNotifier
 from websync.config.manager import ConfigManager
-from websync.db.history import SyncHistoryDb
+from websync.db.history import SyncHistoryDb, SyncHistoryDbError
 from websync.core.logger import get_logger
 from websync.pipeline.summarizer import Summarizer
 from websync.pipeline.translator import Translator
@@ -16,6 +16,7 @@ from websync.core.paths import resolve_path
 class SyncService:
     """전체 동기화 비즈니스 로직 조율을 전담하는 클래스"""
     _pipeline_lock = threading.Lock()
+    _last_pipeline_result: dict = {}
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
@@ -38,6 +39,9 @@ class SyncService:
 
     def is_pipeline_running(self) -> bool:
         return self._pipeline_lock.locked()
+
+    def get_last_pipeline_result(self) -> dict:
+        return dict(self._last_pipeline_result)
 
     def _reload_config(self):
         """최신 설정을 리로드하고 서비스 컴포넌트에 반영"""
@@ -99,11 +103,14 @@ class SyncService:
         if not enabled_sites:
             log("⚠️ 활성화된 수집 대상 사이트가 설정에 없습니다.")
             ToastNotifier.show_toast("X3 WebSync 실패", "동기화가 중단되었습니다. 활성화된 사이트가 없습니다.", is_error=True)
+            self._last_pipeline_result = {"status": "no_sites", "success": False}
             return False
 
         total_sites = len(enabled_sites)
         success_count = 0
+        partial_count = 0
         actual_work_sites = 0
+        site_errors = 0
         generate_cover = self.config.get("epub_cover", True)
 
         for site_idx, site in enumerate(enabled_sites):
@@ -127,10 +134,13 @@ class SyncService:
                 for art in articles:
                     art["url"] = self._article_sync_key(art, name, base_url)
 
-                new_articles = [
-                    art for art in articles
-                    if art.get("url") and not self.db.is_synced(art["url"])
-                ]
+                new_articles = []
+                for art in articles:
+                    url = art.get("url")
+                    if not url:
+                        continue
+                    if not self.db.is_synced(url):
+                        new_articles.append(art)
 
                 skipped = len(articles) - len(new_articles)
                 if skipped:
@@ -162,17 +172,30 @@ class SyncService:
                     status = "✅" if ok else "❌"
                     log(f"   => {status} [{dev_name}] 전송")
 
-                upload_ok = bool(upload_results) and all(upload_results.values())
+                any_ok = bool(upload_results) and any(upload_results.values())
+                all_ok = bool(upload_results) and all(upload_results.values())
 
-                if upload_ok:
-                    log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
+                if any_ok:
                     for art in new_articles:
                         self.db.mark_synced(art["url"], name, art.get("title"))
-                    success_count += 1
+                    if all_ok:
+                        log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
+                        success_count += 1
+                    else:
+                        failed = [n for n, ok in upload_results.items() if not ok]
+                        log(f"⚠️ [{name}] 일부 기기 전송 실패: {', '.join(failed)} (이력 기록됨, 실패 기기만 재시도 필요)")
+                        partial_count += 1
                 else:
                     log(f"❌ [{name}] 전송 실패! 기기가 켜져 있고 Wi-Fi 상태인지 확인하세요.")
 
+            except SyncHistoryDbError as e:
+                self.logger.error(str(e))
+                log(f"❌ [{name}] DB 오류로 중단: {e}")
+                self._last_pipeline_result = {"status": "db_error", "success": False, "message": str(e)}
+                ToastNotifier.show_toast("X3 WebSync DB 오류", str(e), is_error=True)
+                return False
             except Exception as e:
+                site_errors += 1
                 self.logger.exception(f"[{name}] 처리 중 오류: {e}")
                 log(f"❌ [{name}] 처리 중 오류 발생: {e}")
 
@@ -180,19 +203,46 @@ class SyncService:
             progress_callback(total_sites, total_sites)
 
         if actual_work_sites == 0:
+            if site_errors > 0:
+                log(f"\n📊 작업 결과 요약: {site_errors}개 사이트에서 오류 발생. 로그를 확인하세요.")
+                ToastNotifier.show_toast(
+                    "X3 WebSync 동기화 실패",
+                    f"{site_errors}개 사이트 처리 중 오류가 발생했습니다.",
+                    is_error=True,
+                )
+                self._last_pipeline_result = {"status": "errors", "success": False, "site_errors": site_errors}
+                return False
             log("\n📊 작업 결과 요약: 모든 등록 사이트에 전송할 신규 포스트가 없습니다. (기기 전송 생략)")
             ToastNotifier.show_toast(
                 "X3 WebSync 상태",
                 "모든 뉴스 사이트/블로그에 새로 업로드된 신규 기사가 없어 전송을 생략했습니다."
             )
+            self._last_pipeline_result = {"status": "no_new", "success": True}
             return True
 
-        log(f"\n📊 작업 결과 요약: {success_count} / {actual_work_sites} 개 신규 소식 사이트 동기화 전송 완료.")
+        log(f"\n📊 작업 결과 요약: {success_count} / {actual_work_sites} 개 사이트 전체 전송 완료" +
+            (f", {partial_count}개 부분 성공" if partial_count else ""))
 
-        if success_count > 0:
+        overall_ok = success_count == actual_work_sites
+        self._last_pipeline_result = {
+            "status": "completed",
+            "success": overall_ok,
+            "success_count": success_count,
+            "partial_count": partial_count,
+            "actual_work_sites": actual_work_sites,
+            "site_errors": site_errors,
+        }
+
+        if success_count > 0 and overall_ok:
             ToastNotifier.show_toast(
                 "X3 WebSync 동기화 완료",
                 f"신규 업데이트된 {success_count}개 사이트 소식이 무선 전송되었습니다."
+            )
+        elif partial_count > 0:
+            ToastNotifier.show_toast(
+                "X3 WebSync 부분 완료",
+                f"{partial_count}개 사이트가 일부 기기에만 전송되었습니다. 로그를 확인하세요.",
+                is_error=True,
             )
         else:
             ToastNotifier.show_toast(
@@ -201,4 +251,4 @@ class SyncService:
                 is_error=True
             )
 
-        return success_count > 0
+        return overall_ok

@@ -4,15 +4,26 @@ import subprocess
 
 class CalibreManager:
     """calibredb.exe 명령어를 래핑하여 Calibre 도서 정보를 조회하고 경로를 추적하는 클래스"""
-    def __init__(self, calibre_path: str = "C:\\Program Files\\Calibre2\\calibredb.exe"):
+    def __init__(
+        self,
+        calibre_path: str = "C:\\Program Files\\Calibre2\\calibredb.exe",
+        library_path: str = "",
+    ):
         self.calibre_path = calibre_path
+        self.library_path = (library_path or "").strip()
+
+    def _base_cmd(self) -> list[str]:
+        cmd = [self.calibre_path]
+        if self.library_path:
+            cmd.extend(["--with-library", self.library_path])
+        return cmd
 
     def test_connection(self) -> bool:
         """Calibre 실행 파일 경로가 유효한지 검증"""
         if not self.calibre_path or not os.path.exists(self.calibre_path):
             return False
         try:
-            result = subprocess.run([self.calibre_path, "--version"], capture_output=True, text=True, timeout=3)
+            result = subprocess.run(self._base_cmd() + ["--version"], capture_output=True, text=True, timeout=3)
             return result.returncode == 0
         except Exception:
             return False
@@ -22,7 +33,7 @@ class CalibreManager:
         if not self.test_connection():
             return []
         try:
-            cmd = [self.calibre_path, "list", "--fields", "id,title,authors,formats", "--to-json"]
+            cmd = self._base_cmd() + ["list", "--fields", "id,title,authors,formats", "--to-json"]
             result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=15)
             if result.returncode == 0 and result.stdout.strip():
                 return json.loads(result.stdout)
@@ -36,7 +47,7 @@ class CalibreManager:
         if not self.test_connection():
             return ""
         try:
-            cmd = [self.calibre_path, "format-paths", str(book_id)]
+            cmd = self._base_cmd() + ["format-paths", str(book_id)]
             result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=10)
             if result.returncode == 0:
                 lines = result.stdout.strip().split("\n")
