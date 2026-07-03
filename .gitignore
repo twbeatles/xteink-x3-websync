@@ -1,0 +1,22 @@
+# X3 WebSync Git Ignore
+
+# Local Config
+config.json
+
+# Epub Output
+output/
+
+# Python Cache
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# OS Files
+.DS_Store
+Thumbs.db
