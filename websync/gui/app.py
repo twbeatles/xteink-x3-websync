@@ -132,20 +132,32 @@ class SyncAppGui:
             return "break"
         text_widget.bind("<MouseWheel>", _on_mousewheel)
 
-    def _mount_tree_with_scrollbars(self, parent, tree: ttk.Treeview, *, padx=10, pady=8) -> ttk.Frame:
-        tree_frame = ttk.Frame(parent)
-        tree_frame.pack(fill="both", expand=True, padx=padx, pady=pady)
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+    def _create_scrolled_tree(
+        self,
+        parent,
+        columns,
+        show: str = "headings",
+        height: int = 10,
+        *,
+        padx: int = 10,
+        pady: int = 8,
+        **tree_kwargs,
+    ) -> ttk.Treeview:
+        """스크롤바가 붙은 Treeview를 생성합니다. (pack/grid 혼용 방지)"""
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill="both", expand=True, padx=padx, pady=pady)
+        wrapper.grid_rowconfigure(0, weight=1)
+        wrapper.grid_columnconfigure(0, weight=1)
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        tree = ttk.Treeview(wrapper, columns=columns, show=show, height=height, **tree_kwargs)
+        vsb = ttk.Scrollbar(wrapper, orient="vertical", command=tree.yview)
+        hsb = ttk.Scrollbar(wrapper, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
-        return tree_frame
+        return tree
 
     def _set_sync_ui_busy(self, busy: bool) -> None:
         self._sync_busy = busy
@@ -268,12 +280,13 @@ class SyncAppGui:
 
         tree_holder = ttk.Frame(devices_inner)
         tree_holder.grid(row=0, column=0, sticky="nsew")
-        self.devices_tree = ttk.Treeview(tree_holder, columns=("name", "ip"), show="headings", height=3)
+        self.devices_tree = self._create_scrolled_tree(
+            tree_holder, ("name", "ip"), height=3, padx=0, pady=0
+        )
         self.devices_tree.heading("name", text="기기 이름")
         self.devices_tree.heading("ip", text="IP/호스트")
         self.devices_tree.column("name", width=180, minwidth=100)
         self.devices_tree.column("ip", width=220, minwidth=120)
-        self._mount_tree_with_scrollbars(tree_holder, self.devices_tree, padx=0, pady=0)
 
         dev_btn = ttk.Frame(devices_inner)
         dev_btn.grid(row=0, column=1, padx=(8, 0), sticky="n")
@@ -323,7 +336,7 @@ class SyncAppGui:
         sites_frame.pack(fill="x", padx=15, pady=5)
 
         columns = ("name", "type", "enabled", "url")
-        self.tree = ttk.Treeview(sites_frame, columns=columns, show="headings", height=6)
+        self.tree = self._create_scrolled_tree(sites_frame, columns, height=6)
         self.tree.heading("name", text="사이트 이름")
         self.tree.heading("type", text="유형")
         self.tree.heading("enabled", text="활성화")
@@ -332,7 +345,6 @@ class SyncAppGui:
         self.tree.column("type", width=60, minwidth=50, anchor="center")
         self.tree.column("enabled", width=55, minwidth=45, anchor="center")
         self.tree.column("url", width=390, minwidth=120, anchor="w")
-        self._mount_tree_with_scrollbars(sites_frame, self.tree)
         self.tree.bind("<Double-1>", lambda _e: self._edit_site_popup())
 
         btn_frame = ttk.Frame(sites_frame)
@@ -401,7 +413,9 @@ class SyncAppGui:
         calibre_list_frame.pack(fill="x", padx=15, pady=5)
 
         c_columns = ("id", "title", "authors", "formats")
-        self.calibre_tree = ttk.Treeview(calibre_list_frame, columns=c_columns, show="headings", height=8)
+        self.calibre_tree = self._create_scrolled_tree(
+            calibre_list_frame, c_columns, height=8, padx=10, pady=10
+        )
         self.calibre_tree.heading("id", text="ID")
         self.calibre_tree.heading("title", text="도서 제목")
         self.calibre_tree.heading("authors", text="저자")
@@ -410,7 +424,6 @@ class SyncAppGui:
         self.calibre_tree.column("title", width=320, minwidth=120, anchor="w")
         self.calibre_tree.column("authors", width=180, minwidth=80, anchor="w")
         self.calibre_tree.column("formats", width=120, minwidth=80, anchor="center")
-        self._mount_tree_with_scrollbars(calibre_list_frame, self.calibre_tree, padx=10, pady=10)
 
         calibre_action_frame = ttk.Frame(body)
         calibre_action_frame.pack(fill="x", padx=15, pady=10)
@@ -437,7 +450,9 @@ class SyncAppGui:
         hist_frame.pack(fill="x", padx=15, pady=5)
 
         h_columns = ("site", "title", "synced_at", "url")
-        self.hist_tree = ttk.Treeview(hist_frame, columns=h_columns, show="headings", selectmode="extended", height=10)
+        self.hist_tree = self._create_scrolled_tree(
+            hist_frame, h_columns, height=10, selectmode="extended"
+        )
         self.hist_tree.heading("site", text="사이트")
         self.hist_tree.heading("title", text="제목")
         self.hist_tree.heading("synced_at", text="전송 시각")
@@ -446,7 +461,6 @@ class SyncAppGui:
         self.hist_tree.column("title", width=280, minwidth=120, anchor="w")
         self.hist_tree.column("synced_at", width=150, minwidth=100, anchor="center")
         self.hist_tree.column("url", width=250, minwidth=120, anchor="w")
-        self._mount_tree_with_scrollbars(hist_frame, self.hist_tree)
         self.hist_tree.bind("<Double-1>", self._on_history_double_click)
 
     # ── 탭 4: 서버 & 고급 설정 ────────────────────────────────────
