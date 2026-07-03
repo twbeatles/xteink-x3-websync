@@ -1,4 +1,5 @@
 import os
+import io
 from datetime import datetime
 from ebooklib import epub
 
@@ -10,7 +11,60 @@ class EpubBuilder:
         self.font_size = font_size
         self.line_height = line_height
 
-    def build(self, site_name: str, articles: list) -> str:
+    def _make_cover_image(self, site_name: str, article_count: int, today_str: str) -> bytes | None:
+        """Pillow를 사용해 EPUB 표지 이미지를 동적으로 생성. Pillow 미설치 시 None 반환."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import textwrap
+
+            W, H = 600, 800
+            img = Image.new("RGB", (W, H), color="#1e1e2e")
+            draw = ImageDraw.Draw(img)
+
+            # 배경 그라디언트 효과 (수동 직사각형)
+            for y in range(H):
+                ratio = y / H
+                r = int(0x1e + (0x31 - 0x1e) * ratio)
+                g = int(0x1e + (0x32 - 0x1e) * ratio)
+                b = int(0x2e + (0x44 - 0x2e) * ratio)
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+            # 폰트 (시스템 기본 폰트 사용)
+            try:
+                font_title = ImageFont.truetype("malgunbd.ttf", 48)
+                font_sub   = ImageFont.truetype("malgun.ttf", 28)
+                font_small = ImageFont.truetype("malgun.ttf", 22)
+            except Exception:
+                font_title = ImageFont.load_default()
+                font_sub   = font_title
+                font_small = font_title
+
+            # 상단 강조선
+            draw.rectangle([40, 80, W - 40, 85], fill="#89b4fa")
+
+            # 사이트명 (자동 줄바꿈)
+            wrapped = textwrap.fill(site_name, width=12)
+            draw.multiline_text((W // 2, 160), wrapped, font=font_title, fill="#cdd6f4", anchor="mm", align="center")
+
+            # 날짜
+            draw.text((W // 2, H // 2 - 20), today_str, font=font_sub, fill="#89b4fa", anchor="mm")
+
+            # 기사 건수
+            draw.text((W // 2, H // 2 + 40), f"기사 {article_count}건", font=font_small, fill="#a6e3a1", anchor="mm")
+
+            # 하단 강조선
+            draw.rectangle([40, H - 85, W - 40, H - 80], fill="#89b4fa")
+            draw.text((W // 2, H - 55), "X3 WebSync", font=font_small, fill="#585b70", anchor="mm")
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+        except ImportError:
+            return None
+        except Exception:
+            return None
+
+    def build(self, site_name: str, articles: list, generate_cover: bool = True) -> str:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
@@ -24,6 +78,19 @@ class EpubBuilder:
         book.set_title(f"{site_name} ({today_str})")
         # 한국어 텍스트 메타데이터 완벽 적용
         book.set_language("ko")
+
+        # --- 표지 이미지 생성 및 등록 ---
+        if generate_cover:
+            cover_bytes = self._make_cover_image(site_name, len(articles), today_str)
+            if cover_bytes:
+                cover_item = epub.EpubItem(
+                    uid="cover-image",
+                    file_name="images/cover.jpg",
+                    media_type="image/jpeg",
+                    content=cover_bytes
+                )
+                book.add_item(cover_item)
+                book.set_cover("images/cover.jpg", cover_bytes)
 
         spine = ["nav"]
         toc = []
@@ -52,6 +119,14 @@ class EpubBuilder:
             margin-bottom: 0.9em;
             text-indent: 0.5em;
         }}
+        blockquote.ai-summary {{
+            border-left: 3px solid #555555;
+            margin: 10px 5px;
+            padding: 8px 12px;
+            background-color: #f5f5f5;
+            font-style: italic;
+            font-size: 0.9em;
+        }}
         """
 
         for idx, art in enumerate(articles):
@@ -60,6 +135,8 @@ class EpubBuilder:
                 file_name=f"chap_{idx+1}.xhtml",
                 lang="ko"
             )
+            # AI 요약문이 있으면 본문 앞에 삽입
+            summary_html = art.get("summary_html", "")
             # 메타태그에 UTF-8 인코딩 선언 명시하여 한글 깨짐 방지
             chapter.content = f"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -74,6 +151,7 @@ class EpubBuilder:
             </head>
             <body>
                 <h1>{art['title']}</h1>
+                {summary_html}
                 {art['content']}
             </body>
             </html>

@@ -1,59 +1,96 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 
 class X3Uploader:
-    """Xteink X3 기기와의 HTTP 업로드 통신을 전담하는 클래스"""
-    def __init__(self, x3_ip: str):
+    """Xteink X3 기기와의 HTTP 업로드 통신을 전담하는 클래스 (단일/다중 기기 지원)"""
+    def __init__(self, x3_ip: str, devices: Optional[list] = None):
         # x3_ip는 IP 주소 외에도 crosspoint.local 등의 mDNS 호스트명도 수용
         self.x3_ip = x3_ip
+        # 다중 기기 목록: [{"name": "기기1", "ip": "192.168.1.2"}, ...]
+        self.devices = devices or []
 
-    def upload(self, file_path: str) -> bool:
-        url = f"http://{self.x3_ip}/upload"
-        
-        # 파일 확장자 분리 및 CrossPoint 오작동(공백/특수문자/한글 파일명 크래시) 우회용 파일명 클렌징
+    def _sanitize_filename(self, file_path: str) -> str:
+        """CrossPoint 오작동(공백/특수문자/한글 파일명 크래시) 우회용 파일명 클렌징"""
         base, ext = os.path.splitext(os.path.basename(file_path))
-        # 영숫자, 하이픈(-), 언더바(_)를 제외한 특수문자 및 다국어를 언더바로 일괄 정제
         safe_base = "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in base])
-        # 연속된 언더바 정리
         while '__' in safe_base:
             safe_base = safe_base.replace('__', '_')
         safe_base = safe_base.strip('_')
         if not safe_base:
             safe_base = "sync_book"
-        safe_file_name = safe_base + ext.lower()
+        return safe_base + ext.lower()
 
-        # ⚠️ 대용량 도서(예: PDF) 업로드 중 끊김 방지용 가변 타임아웃 계산
-        # 기본 25초에 1MB당 5초씩 가변 버퍼 대기 시간 추가
+    def _calc_timeout(self, file_path: str) -> int:
+        """파일 크기 기반 가변 타임아웃 계산"""
         try:
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         except Exception:
-            file_size_mb = 1.0 # 획득 실패 시 기본 1MB 취급
-            
-        adaptive_timeout = int(25 + (file_size_mb * 5))
+            file_size_mb = 1.0
+        return int(25 + (file_size_mb * 5))
 
+    def _upload_to_ip(self, file_path: str, ip: str, safe_filename: str, timeout: int) -> bool:
+        """지정 IP의 기기로 파일 1건 전송"""
+        url = f"http://{ip}/upload"
         try:
             with open(file_path, "rb") as f:
-                # 안전한 파일명으로 헤더 구성하여 전송
-                files = {"file": (safe_file_name, f, "application/epub+zip")}
-                response = requests.post(url, files=files, timeout=adaptive_timeout)
-            
+                files = {"file": (safe_filename, f, "application/epub+zip")}
+                response = requests.post(url, files=files, timeout=timeout)
             if response.status_code == 200:
                 return True
             else:
-                print(f"❌ 전송 응답 오류: HTTP {response.status_code}")
+                print(f"❌ [{ip}] 전송 응답 오류: HTTP {response.status_code}")
                 return False
         except Exception as e:
-            print(f"❌ 전송 실패 (타임아웃 {adaptive_timeout}초): {e}")
-            print("💡 팁: CrossPoint 기기가 켜져 있고 Wi-Fi 또는 충전 케이블에 안정적으로 연결되어 있는지 확인해 주세요.")
-            print("    (CrossPoint는 기기가 절전 모드로 진입하면 무선 연결을 자동 차단합니다.)")
+            print(f"❌ [{ip}] 전송 실패 (타임아웃 {timeout}초): {e}")
             return False
 
-    def test_connection(self) -> bool:
+    def upload(self, file_path: str) -> bool:
+        """메인 기기(x3_ip)로 파일 전송"""
+        safe_filename = self._sanitize_filename(file_path)
+        timeout = self._calc_timeout(file_path)
+        result = self._upload_to_ip(file_path, self.x3_ip, safe_filename, timeout)
+        if not result:
+            print("💡 팁: CrossPoint 기기가 켜져 있고 Wi-Fi에 연결되어 있는지 확인해 주세요.")
+        return result
+
+    def upload_to_all_devices(self, file_path: str) -> dict:
+        """등록된 모든 기기에 병렬로 파일 전송. 결과를 {기기명: bool} 딕셔너리로 반환."""
+        safe_filename = self._sanitize_filename(file_path)
+        timeout = self._calc_timeout(file_path)
+
+        # 메인 기기 포함 전체 목록 구성
+        all_devices = list(self.devices)
+        if self.x3_ip and not any(d.get("ip") == self.x3_ip for d in all_devices):
+            all_devices.insert(0, {"name": "기본 기기", "ip": self.x3_ip})
+
+        if not all_devices:
+            print("⚠️ 등록된 기기가 없습니다.")
+            return {}
+
+        results = {}
+        with ThreadPoolExecutor(max_workers=min(len(all_devices), 4)) as executor:
+            future_to_device = {
+                executor.submit(self._upload_to_ip, file_path, d["ip"], safe_filename, timeout): d
+                for d in all_devices
+            }
+            for future in as_completed(future_to_device):
+                device = future_to_device[future]
+                name = device.get("name", device["ip"])
+                try:
+                    results[name] = future.result()
+                except Exception as e:
+                    print(f"❌ [{name}] 전송 예외: {e}")
+                    results[name] = False
+        return results
+
+    def test_connection(self, ip: str = None) -> bool:
         """기기가 켜져 있고 지정한 IP/호스트의 웹서버에 접속 가능한지 검사"""
-        url = f"http://{self.x3_ip}/"
+        target_ip = ip or self.x3_ip
+        url = f"http://{target_ip}/"
         try:
-            response = requests.get(url, timeout=3)
+            requests.get(url, timeout=3)
             return True
         except Exception:
             return False
-

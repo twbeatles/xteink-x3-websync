@@ -8,11 +8,13 @@ class ConfigManager:
 
     DEFAULT_CONFIG = {
         "x3_ip": "crosspoint.local", # mDNS 기본값 사용
+        "x3_devices": [],  # 다중 기기 목록 [{"name": "기기1", "ip": "..."}]
         "output_dir": "./output",
         "calibre_path": "C:\\Program Files\\Calibre2\\calibredb.exe",
         "font_family": "serif",
         "font_size": 16,
         "line_height": 1.7,
+        "epub_cover": True,  # EPUB 표지 자동 생성 (Pillow 필요)
         "sites": [
             {
                 "name": "예시 블로그 (일반 웹)",
@@ -23,22 +25,52 @@ class ConfigManager:
                 "content_selector": ".post-content",
                 "remove_selectors": ".ad-banner, .reply-box",
                 "limit": 5,
-                "enabled": True
+                "enabled": True,
+                "include_images": False,  # 이미지 포함 여부
+                "translate_to": "",       # 번역 대상 언어 (예: "ko"), 빈값이면 번역 안 함
             },
             {
                 "name": "예시 뉴스 피드 (RSS)",
                 "type": "rss",
                 "url": "https://example.com/feed.xml",
                 "limit": 5,
-                "enabled": False
+                "enabled": False,
+                "include_images": False,
+                "translate_to": "",
             }
         ],
         "schedule": {
             "enabled": False,
             "hour": "07",
             "minute": "00"
+        },
+        "ai_summary": {
+            "enabled": False,
+            "provider": "openai",      # "openai" | "ollama"
+            "api_key": "",
+            "model": "gpt-4o-mini",
+            "ollama_host": "http://localhost:11434"
+        },
+        "translation": {
+            "enabled": False,
+            "provider": "googletrans", # "googletrans" | "libretranslate"
+            "libretranslate_host": "http://localhost:5000",
+            "libretranslate_api_key": ""
+        },
+        "opds_server": {
+            "enabled": False,
+            "port": 8765
+        },
+        "web_dashboard": {
+            "enabled": False,
+            "port": 8766
+        },
+        "calibre_watch": {
+            "enabled": False,
+            "watch_dir": ""
         }
     }
+
 
     def __init__(self, config_path="config.json"):
         self.config_path = config_path

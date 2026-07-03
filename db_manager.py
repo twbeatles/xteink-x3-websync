@@ -58,3 +58,54 @@ class SyncHistoryDb:
             except Exception as e:
                 print(f"❌ DB 기록 저장 실패: {e}")
 
+    def get_history(self, limit: int = 200) -> list:
+        """동기화 이력을 최신순으로 반환 (GUI 이력 탭 표시용)"""
+        with self._db_lock:
+            try:
+                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT url, site_name, title, synced_at FROM synced_posts ORDER BY synced_at DESC LIMIT ?",
+                        (limit,)
+                    )
+                    return cursor.fetchall()
+            except Exception as e:
+                print(f"⚠️ DB 이력 조회 실패: {e}")
+                return []
+
+    def delete_entry(self, url: str):
+        """특정 URL의 동기화 이력 삭제 (재전송 허용)"""
+        if not url:
+            return
+        with self._db_lock:
+            try:
+                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM synced_posts WHERE url = ?", (url,))
+                    conn.commit()
+            except Exception as e:
+                print(f"❌ DB 이력 삭제 실패: {e}")
+
+    def clear_all(self):
+        """모든 동기화 이력 초기화"""
+        with self._db_lock:
+            try:
+                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM synced_posts")
+                    conn.commit()
+            except Exception as e:
+                print(f"❌ DB 전체 초기화 실패: {e}")
+
+    def get_count(self) -> int:
+        """전체 이력 건수 반환"""
+        with self._db_lock:
+            try:
+                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM synced_posts")
+                    row = cursor.fetchone()
+                    return row[0] if row else 0
+            except Exception:
+                return 0
+

@@ -4,6 +4,10 @@ from abc import ABC, abstractmethod
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 class BaseScraper(ABC):
     """모든 스크래퍼가 상속받아야 하는 추상 기본 클래스"""
     @abstractmethod
@@ -252,12 +256,216 @@ class NaverBlogScraper(BaseScraper):
 
         return articles
 
+class TistoryScraper(BaseScraper):
+    """티스토리 블로그 전용 스크래퍼 - RSS에서 URL 추출 후 본문 직접 수집"""
+    def fetch_articles(self, site_config: dict) -> list:
+        url = site_config.get("url", "")
+        limit = site_config.get("limit", 5)
+        articles = []
+        try:
+            # RSS 피드에서 글 목록 수집
+            rss_url = url if url.endswith("/rss") else url.rstrip("/") + "/rss"
+            resp = requests.get(rss_url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml-xml")
+            items = soup.find_all("item")[:limit]
+            for item in items:
+                title_tag = item.find("title")
+                link_tag = item.find("link")
+                if not title_tag or not link_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                post_url = link_tag.get_text(strip=True) if link_tag else ""
+                if not post_url:
+                    link_tag2 = item.find("link")
+                    post_url = str(link_tag2) if link_tag2 else ""
+                content = self._fetch_post_content(post_url)
+                if content:
+                    articles.append({"title": title, "content": content, "url": post_url})
+        except Exception as e:
+            print(f"❌ TistoryScraper 오류: {e}")
+        return articles
+
+    def _fetch_post_content(self, url: str) -> str:
+        if not url:
+            return ""
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            # 티스토리 본문 컨테이너 순서대로 탐색
+            content_tag = (
+                soup.find("div", class_="tt_article_useless_p_margin") or
+                soup.find("div", class_="article-view") or
+                soup.find("div", id="content") or
+                soup.find("article")
+            )
+            if not content_tag:
+                return ""
+            # 서식 박멸
+            for tag in content_tag.find_all(True):
+                tag.attrs = {k: v for k, v in tag.attrs.items() if k in ("href", "src")}
+            for img in content_tag.find_all("img"):
+                img.decompose()
+            return str(content_tag)
+        except Exception as e:
+            print(f"⚠️ TistoryScraper 포스트 수집 실패 ({url}): {e}")
+            return ""
+
+
+class BrunchScraper(BaseScraper):
+    """카카오 브런치 전용 스크래퍼"""
+    def fetch_articles(self, site_config: dict) -> list:
+        url = site_config.get("url", "")  # 예: https://brunch.co.kr/@authorid
+        limit = site_config.get("limit", 5)
+        articles = []
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            # 최신 글 링크 수집
+            links = soup.select("a.link_post")[:limit]
+            if not links:
+                links = soup.select("ul.list_article_m li a")[:limit]
+            for a_tag in links:
+                href = a_tag.get("href", "")
+                if not href:
+                    continue
+                if not href.startswith("http"):
+                    href = "https://brunch.co.kr" + href
+                title_tag = a_tag.find("strong") or a_tag.find("h3") or a_tag.find("h4")
+                title = title_tag.get_text(strip=True) if title_tag else a_tag.get_text(strip=True)
+                content = self._fetch_brunch_content(href)
+                if content:
+                    articles.append({"title": title, "content": content, "url": href})
+        except Exception as e:
+            print(f"❌ BrunchScraper 오류: {e}")
+        return articles
+
+    def _fetch_brunch_content(self, url: str) -> str:
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            content_tag = (
+                soup.find("div", class_="wrap_article_body") or
+                soup.find("div", class_="article_body") or
+                soup.find("article")
+            )
+            if not content_tag:
+                return ""
+            # 서식 박멸 + 이미지 제거
+            for tag in content_tag.find_all(True):
+                tag.attrs = {k: v for k, v in tag.attrs.items() if k in ("href",)}
+            for img in content_tag.find_all("img"):
+                img.decompose()
+            return str(content_tag)
+        except Exception as e:
+            print(f"⚠️ BrunchScraper 포스트 수집 실패 ({url}): {e}")
+            return ""
+
+
+class YoutubeScraper(BaseScraper):
+    """YouTube 채널 최신 영상의 자막을 수집하여 EPUB으로 변환하는 스크래퍼"""
+    def fetch_articles(self, site_config: dict) -> list:
+        # url은 채널 RSS 피드: https://www.youtube.com/feeds/videos.xml?channel_id=...
+        url = site_config.get("url", "")
+        limit = site_config.get("limit", 3)
+        articles = []
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml-xml")
+            entries = soup.find_all("entry")[:limit]
+            for entry in entries:
+                title_tag = entry.find("title")
+                video_id_tag = entry.find("yt:videoId")
+                if not title_tag or not video_id_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                video_id = video_id_tag.get_text(strip=True)
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                content = self._fetch_transcript(video_id, title)
+                if content:
+                    articles.append({"title": title, "content": content, "url": video_url})
+        except Exception as e:
+            print(f"❌ YoutubeScraper 오류: {e}")
+        return articles
+
+    def _fetch_transcript(self, video_id: str, title: str) -> str:
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+            # 한국어 자막 우선, 없으면 자동생성 한국어, 없으면 영어
+            for lang in (["ko"], ["en"]):
+                try:
+                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=lang)
+                    # 문장 단위 단락 구성
+                    paragraphs = []
+                    chunk = []
+                    for seg in transcript:
+                        chunk.append(seg["text"])
+                        if len(chunk) >= 10:
+                            paragraphs.append("<p>" + " ".join(chunk) + "</p>")
+                            chunk = []
+                    if chunk:
+                        paragraphs.append("<p>" + " ".join(chunk) + "</p>")
+                    return "\n".join(paragraphs)
+                except (NoTranscriptFound, Exception):
+                    continue
+        except ImportError:
+            print("⚠️ youtube_transcript_api 미설치. pip install youtube-transcript-api")
+        except Exception as e:
+            print(f"⚠️ YouTube 자막 수집 실패 ({video_id}): {e}")
+        return ""
+
+
+class SubstackScraper(BaseScraper):
+    """Substack 뉴스레터 전용 스크래퍼 - RSS 전문을 수신 후 Substack 고유 요소 클렌징"""
+    def fetch_articles(self, site_config: dict) -> list:
+        url = site_config.get("url", "")  # 예: https://example.substack.com/feed
+        limit = site_config.get("limit", 5)
+        articles = []
+        try:
+            rss_url = url if "/feed" in url else url.rstrip("/") + "/feed"
+            resp = requests.get(rss_url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml-xml")
+            items = soup.find_all("item")[:limit]
+            for item in items:
+                title_tag = item.find("title")
+                link_tag = item.find("link")
+                desc_tag = item.find("content:encoded") or item.find("description")
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                link = link_tag.get_text(strip=True) if link_tag else ""
+                content_html = desc_tag.get_text() if desc_tag else ""
+                # Substack 특유의 paywall/버튼 클렌징
+                content_soup = BeautifulSoup(content_html, "lxml")
+                for sel in ["div.subscribe-widget", "div.paywall", "div.button-wrapper", ".post-footer"]:
+                    for el in content_soup.select(sel):
+                        el.decompose()
+                for tag in content_soup.find_all(True):
+                    tag.attrs = {k: v for k, v in tag.attrs.items() if k in ("href",)}
+                for img in content_soup.find_all("img"):
+                    img.decompose()
+                clean_content = str(content_soup)
+                articles.append({"title": title, "content": clean_content, "url": link})
+        except Exception as e:
+            print(f"❌ SubstackScraper 오류: {e}")
+        return articles
+
+
 class ScraperFactory:
     """스크래퍼 객체 생성을 담당하는 팩토리 클래스 (OCP 준수)"""
     _scrapers = {
         "css": CssSelectorScraper(),
         "rss": RssScraper(),
-        "naver": NaverBlogScraper()
+        "naver": NaverBlogScraper(),
+        "tistory": TistoryScraper(),
+        "brunch": BrunchScraper(),
+        "youtube": YoutubeScraper(),
+        "substack": SubstackScraper(),
     }
 
     @classmethod

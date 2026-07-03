@@ -31,6 +31,8 @@ if sys.platform == 'win32':
 from config_manager import ConfigManager
 from service import SyncService
 from gui import SyncAppGui
+from logger import get_logger
+
 
 # 프로그램 다중 실행 방지용 파일 락 변수 보존
 lock_file = None
@@ -73,7 +75,13 @@ def main():
         sys.exit(1)
 
     try:
+        # 로거 초기화 (logs/ 폴더 자동 생성 및 날짜별 파일 생성)
+        logger = get_logger()
+        logger.info("=" * 60)
+        logger.info(f"X3 WebSync 시작 (PID: {os.getpid()})")
+
         parser = argparse.ArgumentParser(description="Xteink X3 WebSync CLI / GUI Manager")
+
         parser.add_argument(
             "--sync", 
             action="store_true", 
