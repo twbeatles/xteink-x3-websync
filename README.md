@@ -1,74 +1,117 @@
 # Xteink X3 WebSync Manager 🚀
 
-Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 스크래핑 및 Calibre 라이브러리 무선 동기화 GUI 매니저 툴입니다. 
+Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 스크래핑 및 Calibre 라이브러리 무선 동기화 GUI 매니저 툴입니다.
 
-기존의 단일 웹 크롤링 스크립트를 객체 지향적인 **SOLID 원칙**에 맞춰 각 역할별 모듈로 깔끔히 분리·재설계하여 유지보수성과 확장성이 우수합니다.
+기존의 단일 웹 크롤링 스크립트를 **SOLID 원칙**에 맞춰 모듈별로 분리·재설계하여 유지보수성과 확장성을 높였습니다.
 
 ---
 
 ## 주요 기능 ✨
 
-1. **다중 사이트 뉴스 수집 및 EPUB 빌드**:
-   - 일반 웹사이트(CSS 선택자 기반) 및 RSS 피드(XML 기반) 등 여러 매체를 동시 스캔하여 기사 본문을 수집합니다.
-   - 본문 내 불필요한 영역(광고 배너, 댓글창, 프로필 카드 등)을 자동으로 완전히 정제(`remove_selectors` 지원)하여 순수 기사 내용만 보존합니다.
-   - e-ink 기기 화면에 완벽히 호환되도록 양쪽 정렬, 줄 간격 및 글자 크기가 가독성 좋게 포맷팅된 한국어 EPUB 전자책을 실시간 생성합니다.
+1. **다중 사이트 뉴스 수집 및 EPUB 빌드**
+   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`
+   - 사이트별 이미지 포함/제거, 번역, AI 요약(선택) 지원
+   - SQLite 이력 DB로 증분 동기화 (중복 전송 방지)
+   - e-ink 최적화 한국어 EPUB 생성 (표지 자동 생성 옵션)
 
-2. **Calibre(칼리버) 서재 무선 연동**:
-   - 로컬 PC에 설치된 Calibre 서재 데이터베이스(`calibredb.exe`)를 직접 제어하여 도서 목록을 불러옵니다.
-   - 원하는 책을 다중 선택하여 클릭 한 번으로 X3 기기로 무선 즉시 업로드(EPUB/PDF 등)합니다.
+2. **Calibre 서재 무선 연동** — `calibredb.exe`로 도서 목록 조회·다중 선택 전송
 
-3. **로컬 파일 직접 무선 전송**:
-   - PC에 따로 소장 중인 소설이나 문서를 GUI 파일 탐색기로 선택해 무선 전송할 수 있는 직접 전송 프레임을 지원합니다.
+3. **로컬 파일 직접 무선 전송** — EPUB/PDF/MOBI/TXT
 
-4. **윈도우 자동 스케줄러 및 토스트 알림 연동**:
-   - GUI 상에서 매일 자동 구동하고 싶은 시/분을 입력하고 등록하면 윈도우 작업 스케줄러(`schtasks`)에 자동 등록됩니다.
-   - 매일 지정된 시간에 백그라운드 무음 모드로 동기화 파이프라인이 자동 실행되며, 성공 여부를 윈도우 네이티브 토스트(Toast) 시스템 알림으로 알려줍니다.
+4. **다중 X3 기기 동시 전송** — GUI에서 추가 기기 등록
 
-5. **CrossPoint 펌웨어 최적화**:
-   - 파일 전송 시 한글명이나 공백/특수문자가 포함되어 있을 경우 기기 내부에서 발생하는 문자 파싱 충돌(크래시) 현상을 방지하기 위해, 전송 파일명을 영숫자 및 언더바(`_`) 위주로 안전하게 세니타이징하여 전송합니다.
-   - 기기 절전(Sleep) 모드 진입으로 인한 Wi-Fi 수신 끊김에 대처할 수 있도록 가이드 및 예외 팁을 제공합니다.
+5. **자동 스케줄러** — Windows `schtasks` / macOS `launchd` / Linux `crontab`
+
+6. **동기화 이력 탭** — 전송 이력 조회·삭제(재전송 허용)
+
+7. **OPDS 카탈로그 서버** — 생성 EPUB 브라우징 (기본 localhost)
+
+8. **웹 대시보드** — 브라우저에서 동기화 트리거·로그 확인 (API 토큰 인증)
+
+9. **Calibre Watch** — 폴더 감시 후 신규 파일 자동 전송
+
+10. **실행 로그** — `logs/sync_YYYY-MM-DD.log` 자동 저장
 
 ---
 
-## 프로젝트 모듈 구성 (SOLID 설계) 🏗️
+## 프로젝트 모듈 구성 🏗️
 
-*   `x3_websync.py`: 메인 진입점. 명령행 플래그 파싱 및 구동 트리거링.
-*   `config_manager.py`: `config.json` 세팅 관리 및 누락된 키 자동 보강.
-*   `scrapers.py`: 추상 클래스 `BaseScraper` 및 CSS/RSS 수집 구현체와 팩토리.
-*   `calibre.py`: Calibre 서재 데이터 파싱 및 도서 포맷 파일 원본 경로 획득.
-*   `builder.py`: 한국어 가독성에 최적화된 CSS 정의 및 UTF-8 보장 EPUB 빌더.
-*   `uploader.py`: 기기 `POST /upload` 전송 및 파일명 화이트리스트 변환.
-*   `notifier.py`: 무설치형 윈도우 네이티브 PowerShell 알림 제어.
-*   `scheduler.py`: 윈도우 작업 스케줄러 스케줄 등록/해제.
-*   `service.py`: 비즈니스 로직(수집 -> EPUB 포맷팅 -> 기기 전송) 오케스트레이터.
-*   `gui.py`: Tkinter 모던 다크 테마 기반 탭 레이아웃 사용자 인터페이스.
+```
+xteink-x3-websync/
+├── x3_websync.py              # 진입점 (CLI/GUI, 단일 인스턴스 락)
+├── websync/                   # 메인 패키지 (SOLID 기반 모듈 분리)
+│   ├── core/                  # paths, article, logger
+│   ├── config/                # ConfigManager
+│   ├── db/                    # SyncHistoryDb
+│   ├── scrapers/              # 7종 스크래퍼 + factory
+│   ├── epub/                  # EpubBuilder
+│   ├── upload/                # X3Uploader (다중 기기)
+│   ├── pipeline/              # SyncService, Summarizer, Translator
+│   ├── integrations/          # CalibreManager, ToastNotifier
+│   ├── scheduler/             # SchedulerManager
+│   ├── servers/               # OPDSServer, WebDashboard
+│   ├── watch/                 # CalibreWatcher
+│   └── gui/                   # SyncAppGui
+├── tests/                     # pytest 단위·통합 테스트
+└── scripts/                   # 마이그레이션·검증 스크립트
+```
+
+| 패키지/모듈 | 역할 |
+|-------------|------|
+| `x3_websync.py` | 진입점 — `websync.*` 패키지 로드 |
+| `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅 |
+| `websync.config` | `config.json` CRUD, deep merge |
+| `websync.pipeline` | 동기화 파이프라인 오케스트레이터 |
+| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack + 팩토리 |
+| `websync.epub` | EPUB 빌더 |
+| `websync.upload` | HTTP 업로드 (다중 기기) |
+| `websync.db` | SQLite 동기화 이력 |
+| `websync.gui` | Tkinter GUI |
+| `websync.scheduler` | 크로스플랫폼 스케줄러 |
+| `websync.servers` | OPDS·웹 대시보드 |
+| `websync.watch` | Calibre 폴더 감시 |
 
 ---
 
 ## 사용 방법 💡
 
-### 1. 프로그램 실행
-프로젝트 디렉토리에서 아래 명령어를 실행하면 GUI 창이 로드됩니다:
+### 설치
+```bash
+pip install -r requirements.txt
+```
+
+### 실행
 ```bash
 python x3_websync.py
 ```
 
-### 2. 기기 주소 설정 및 연동
-- 상단 **"X3 주소 (IP/호스트)"** 칸에 X3 기기 와이파이 연결 시 화면에 나타나는 IP 주소 또는 `crosspoint.local`을 입력하고 `연결 확인`을 누릅니다.
-- Calibre를 사용 중인 경우 Calibre 탭에서 `calibredb.exe` 설치 위치를 지정한 뒤 `연결 확인 & 서재 로드`를 클릭합니다.
+### 백그라운드 동기화 (스케줄러용)
+```bash
+python x3_websync.py --sync
+```
 
-### 3. 스케줄 자동 실행 등록
-- 원하는 아침 시간을 지정(예: `07`시 `30`분)하고 `등록` 버튼을 누르면 매일 해당 시간에 뉴스 수집 EPUB 빌드 및 기기 전송이 자동으로 백그라운드 진행됩니다.
-
-### 4. 수동 동기화
-- `🚀 즉시 전체 뉴스 스크래핑 및 X3 동기화 실행` 버튼을 클릭하면 즉시 뉴스 동기화가 이루어집니다.
+### 기본 설정
+- **X3 주소**: Wi-Fi IP 또는 `crosspoint.local`
+- **추가 기기**: GUI에서 다중 기기 등록
+- **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성)
 
 ---
 
 ## 환경 요구사항 📦
 
-본 프로그램을 구동하려면 아래 라이브러리들이 필요합니다.
+- Python 3.10+
+- 필수: `beautifulsoup4`, `ebooklib`, `requests`, `lxml`
+- 선택: `Pillow`(표지), `googletrans`(번역), `youtube-transcript-api`, `watchdog`(폴더 감시)
+- Calibre 연동 시 로컬 PC에 Calibre 설치 필요
+
+### 테스트
 ```bash
-pip install beautifulsoup4 ebooklib requests lxml
+python -m pytest tests/ -q
 ```
-*주의: Calibre 연동을 하려면 로컬 PC에 Calibre가 설치되어 있어야 합니다.*
+
+### Windows EXE 빌드 (PyInstaller)
+```bash
+pip install pyinstaller
+pyinstaller x3_websync.spec
+```
+빌드 결과물: `dist/x3_websync.exe` (GUI 모드, 콘솔 없음)

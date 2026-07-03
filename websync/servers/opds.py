@@ -1,7 +1,7 @@
-"""OPDS 1.2 카탈로그 경량 HTTP 서버 모듈"""
+"""OPDS 카탈로그 HTTP 서버"""
 import os
-import threading
 import re
+import threading
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
@@ -12,7 +12,7 @@ class OPDSHandler(BaseHTTPRequestHandler):
     output_dir: str = "./output"
 
     def log_message(self, format, *args):
-        pass  # 기본 콘솔 로그 억제
+        pass
 
     def do_GET(self):
         if self.path in ("/", "/opds", "/opds/"):
@@ -62,7 +62,6 @@ class OPDSHandler(BaseHTTPRequestHandler):
 
     def _serve_file(self):
         fname = self.path[len("/opds/download/"):]
-        # 경로 이탈 방지
         fname = os.path.basename(fname)
         fpath = os.path.join(self.output_dir, fname)
         if not os.path.isfile(fpath):
@@ -80,9 +79,10 @@ class OPDSHandler(BaseHTTPRequestHandler):
 class OPDSServer:
     """OPDS HTTP 서버를 백그라운드 스레드로 실행·관리하는 클래스"""
 
-    def __init__(self, output_dir: str = "./output", port: int = 8765):
+    def __init__(self, output_dir: str = "./output", port: int = 8765, bind_host: str = "127.0.0.1"):
         self.output_dir = output_dir
         self.port = port
+        self.bind_host = bind_host
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -92,7 +92,7 @@ class OPDSServer:
             return True
         try:
             OPDSHandler.output_dir = self.output_dir
-            self._server = HTTPServer(("", self.port), OPDSHandler)
+            self._server = HTTPServer((self.bind_host, self.port), OPDSHandler)
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
             self._thread.start()
             self._running = True
@@ -112,4 +112,5 @@ class OPDSServer:
         return self._running
 
     def get_url(self) -> str:
-        return f"http://localhost:{self.port}/opds"
+        host = "localhost" if self.bind_host in ("127.0.0.1", "localhost") else self.bind_host
+        return f"http://{host}:{self.port}/opds"

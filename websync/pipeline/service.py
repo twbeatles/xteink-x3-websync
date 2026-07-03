@@ -1,25 +1,32 @@
 import os
+import threading
 from typing import Callable, Optional
-from scrapers import ScraperFactory
-from builder import EpubBuilder
-from uploader import X3Uploader
-from notifier import ToastNotifier
-from config_manager import ConfigManager
-from db_manager import SyncHistoryDb
-from logger import get_logger
-from summarizer import Summarizer
-from translator import Translator
+from websync.scrapers import ScraperFactory
+from websync.epub.builder import EpubBuilder
+from websync.upload.uploader import X3Uploader
+from websync.integrations.notifier import ToastNotifier
+from websync.config.manager import ConfigManager
+from websync.db.history import SyncHistoryDb
+from websync.core.logger import get_logger
+from websync.pipeline.summarizer import Summarizer
+from websync.pipeline.translator import Translator
+from websync.core.article import ensure_article_url
+from websync.core.paths import resolve_path
 
 class SyncService:
     """전체 동기화 비즈니스 로직 조율을 전담하는 클래스"""
+    _pipeline_lock = threading.Lock()
+
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self.config = self.config_manager.load_config()
         self.db = SyncHistoryDb()
         self.logger = get_logger()
+        self._apply_config_to_components()
 
+    def _apply_config_to_components(self):
         self.epub_builder = EpubBuilder(
-            output_dir=self.config.get("output_dir", "./output"),
+            output_dir=self.config_manager.get_resolved_output_dir(self.config),
             font_family=self.config.get("font_family", "serif"),
             font_size=self.config.get("font_size", 16),
             line_height=self.config.get("line_height", 1.7)
@@ -29,15 +36,22 @@ class SyncService:
             devices=self.config.get("x3_devices", [])
         )
 
+    def is_pipeline_running(self) -> bool:
+        return self._pipeline_lock.locked()
+
     def _reload_config(self):
         """최신 설정을 리로드하고 서비스 컴포넌트에 반영"""
         self.config = self.config_manager.load_config()
-        self.epub_builder.output_dir = self.config.get("output_dir", "./output")
-        self.epub_builder.font_family = self.config.get("font_family", "serif")
-        self.epub_builder.font_size = self.config.get("font_size", 16)
-        self.epub_builder.line_height = self.config.get("line_height", 1.7)
-        self.uploader.x3_ip = self.config.get("x3_ip", "crosspoint.local")
-        self.uploader.devices = self.config.get("x3_devices", [])
+        self._apply_config_to_components()
+
+    @staticmethod
+    def _article_sync_key(article: dict, site_name: str, base_url: str) -> str:
+        url = ensure_article_url(
+            article.get("url", ""),
+            base_url,
+            article.get("title", "")
+        )
+        return url
 
     def run_sync_pipeline(
         self,
@@ -46,12 +60,28 @@ class SyncService:
     ) -> bool:
         """
         동기화 파이프라인 실행.
-        Args:
-            log_callback: 로그 메시지 콜백 (GUI 연동용). None이면 print 사용.
-            progress_callback: (현재_인덱스, 전체_수) 진행률 콜백. None이면 스킵.
         Returns:
-            bool: True이면 성공 또는 신규 기사 없음 / False이면 오류
+            bool: True이면 성공 또는 신규 기사 없음 / False이면 오류 또는 이미 실행 중
         """
+        if not self._pipeline_lock.acquire(blocking=False):
+            msg = "⚠️ 동기화가 이미 실행 중입니다. 완료 후 다시 시도해 주세요."
+            self.logger.warning(msg)
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+            return False
+
+        try:
+            return self._run_sync_pipeline_locked(log_callback, progress_callback)
+        finally:
+            self._pipeline_lock.release()
+
+    def _run_sync_pipeline_locked(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> bool:
         def log(msg: str):
             self.logger.info(msg)
             if log_callback:
@@ -60,10 +90,8 @@ class SyncService:
                 print(msg)
 
         log("✨ 동기화 프로세스를 실행합니다...")
-
         self._reload_config()
 
-        # AI 요약 / 번역 모듈 초기화
         summarizer = Summarizer(self.config)
         translator = Translator(self.config)
 
@@ -81,10 +109,9 @@ class SyncService:
         for site_idx, site in enumerate(enabled_sites):
             name = site.get("name", "무명 사이트")
             scraper_type = site.get("type", "css")
-            include_images = site.get("include_images", False)
+            base_url = site.get("url", "")
             translate_to = site.get("translate_to", "").strip()
 
-            # 진행률 콜백
             if progress_callback:
                 progress_callback(site_idx, total_sites)
 
@@ -94,31 +121,33 @@ class SyncService:
                 articles = scraper.fetch_articles(site)
 
                 if not articles:
-                    log(f"⚠️ [{name}] 수집 성공했으나 기사가 비어있어 건너뜁니다.")
+                    log(f"⚠️ [{name}] 수집된 기사가 없어 건너뜁니다. (URL·스크래퍼 설정·네트워크를 확인하세요)")
                     continue
 
-                # SQLite DB를 조회하여 이미 전송된 글 필터링 (증분 동기화)
+                for art in articles:
+                    art["url"] = self._article_sync_key(art, name, base_url)
+
                 new_articles = [
                     art for art in articles
-                    if not self.db.is_synced(art.get("url") or art.get("title"))
+                    if art.get("url") and not self.db.is_synced(art["url"])
                 ]
 
+                skipped = len(articles) - len(new_articles)
+                if skipped:
+                    log(f"   => 💡 중복 제외 {skipped}건 (이미 전송된 포스트)")
+
                 if not new_articles:
-                    log(f"   => 💡 모든 글({len(articles)}개)이 이미 이전에 전송된 중복 포스트입니다. 전송을 건너뜁니다.")
+                    log(f"   => 💡 [{name}] 전송할 신규 포스트가 없습니다.")
                     continue
 
                 actual_work_sites += 1
                 log(f"📦 [{name}] 신규 포스트 {len(new_articles)}개 검출. 후처리 중...")
 
-                # 이미지 옵션: 포함하지 않는 경우 이미 스크래퍼에서 제거됨
-                # (include_images=True인 경우 스크래퍼가 이미지를 보존하도록 설정)
-                # 번역 처리
-                if translate_to and translator.is_available():
+                if translate_to and translator.is_available_for_site(translate_to):
                     log(f"   => 🌐 [{name}] '{translate_to}' 언어로 번역 중...")
                     for art in new_articles:
                         art["content"] = translator.translate_html(art["content"], target_lang=translate_to)
 
-                # AI 요약 처리
                 if summarizer.is_available():
                     log(f"   => 🤖 [{name}] AI 요약 생성 중...")
                     for art in new_articles:
@@ -128,22 +157,17 @@ class SyncService:
                 epub_path = self.epub_builder.build(name, new_articles, generate_cover=generate_cover)
                 log(f"   => 파일 생성: {os.path.basename(epub_path)}")
 
-                log(f"📡 기기({self.uploader.x3_ip})로 무선 파일 전송 중...")
-                upload_ok = self.uploader.upload(epub_path)
+                upload_results = self.uploader.upload_to_targets(epub_path)
+                for dev_name, ok in upload_results.items():
+                    status = "✅" if ok else "❌"
+                    log(f"   => {status} [{dev_name}] 전송")
 
-                # 다중 기기 전송 (추가 기기가 있는 경우)
-                if self.uploader.devices:
-                    log(f"   => 📡 다중 기기 {len(self.uploader.devices)}대로 동시 전송 중...")
-                    multi_results = self.uploader.upload_to_all_devices(epub_path)
-                    for dev_name, ok in multi_results.items():
-                        status = "✅" if ok else "❌"
-                        log(f"      {status} [{dev_name}]")
+                upload_ok = bool(upload_results) and all(upload_results.values())
 
                 if upload_ok:
                     log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
                     for art in new_articles:
-                        art_url = art.get("url") or art.get("title")
-                        self.db.mark_synced(art_url, name, art.get("title"))
+                        self.db.mark_synced(art["url"], name, art.get("title"))
                     success_count += 1
                 else:
                     log(f"❌ [{name}] 전송 실패! 기기가 켜져 있고 Wi-Fi 상태인지 확인하세요.")
@@ -152,11 +176,9 @@ class SyncService:
                 self.logger.exception(f"[{name}] 처리 중 오류: {e}")
                 log(f"❌ [{name}] 처리 중 오류 발생: {e}")
 
-        # 완료 진행률
         if progress_callback:
             progress_callback(total_sites, total_sites)
 
-        # 전체 결과 메시지 튜닝
         if actual_work_sites == 0:
             log("\n📊 작업 결과 요약: 모든 등록 사이트에 전송할 신규 포스트가 없습니다. (기기 전송 생략)")
             ToastNotifier.show_toast(

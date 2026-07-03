@@ -26,4 +26,3 @@ class ToastNotifier:
             )
         except Exception as e:
             print(f"⚠️ 시스템 알림 표시 실패: {e}")
-

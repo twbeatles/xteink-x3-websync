@@ -1,17 +1,48 @@
 """Calibre 서재 폴더 변경 감시 모듈 (watchdog 사용)"""
 import os
+import time
 import threading
 from typing import Callable, Optional
+
+DEBOUNCE_SECONDS = 2.0
 
 
 class CalibreWatcher:
     """Calibre 라이브러리 폴더에 새 파일이 추가되면 콜백을 호출하는 감시자"""
 
-    def __init__(self, watch_dir: str, on_new_file: Callable[[str], None]):
+    def __init__(self, watch_dir: str, on_new_file: Callable[[str], None], debounce_sec: float = DEBOUNCE_SECONDS):
         self.watch_dir = watch_dir
         self.on_new_file = on_new_file
+        self.debounce_sec = debounce_sec
         self._observer: Optional[object] = None
         self._running = False
+        self._pending: dict[str, float] = {}
+        self._pending_lock = threading.Lock()
+        self._debounce_timer: Optional[threading.Timer] = None
+
+    def _schedule_debounced(self, fpath: str):
+        with self._pending_lock:
+            self._pending[fpath] = time.time()
+            if self._debounce_timer:
+                self._debounce_timer.cancel()
+            self._debounce_timer = threading.Timer(self.debounce_sec, self._flush_pending)
+            self._debounce_timer.daemon = True
+            self._debounce_timer.start()
+
+    def _flush_pending(self):
+        with self._pending_lock:
+            now = time.time()
+            ready = [
+                path for path, ts in self._pending.items()
+                if now - ts >= self.debounce_sec and os.path.isfile(path)
+            ]
+            for path in ready:
+                del self._pending[path]
+        for path in ready:
+            try:
+                self.on_new_file(path)
+            except Exception as e:
+                print(f"⚠️ Watch 콜백 오류 ({path}): {e}")
 
     def start(self) -> bool:
         if self._running:
@@ -32,7 +63,7 @@ class CalibreWatcher:
                     fpath = event.src_path
                     ext = os.path.splitext(fpath)[1].lower()
                     if ext in (".epub", ".pdf", ".mobi", ".txt", ".azw3"):
-                        watcher_self.on_new_file(fpath)
+                        watcher_self._schedule_debounced(fpath)
 
             self._observer = Observer()
             self._observer.schedule(_Handler(), self.watch_dir, recursive=True)
@@ -47,6 +78,9 @@ class CalibreWatcher:
             return False
 
     def stop(self):
+        if self._debounce_timer:
+            self._debounce_timer.cancel()
+            self._debounce_timer = None
         if self._observer:
             self._observer.stop()
             self._observer.join(timeout=3)

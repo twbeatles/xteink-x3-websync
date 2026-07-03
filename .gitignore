@@ -6,6 +6,10 @@ config.json
 # Epub Output
 output/
 
+# Local DB & Logs
+sync_history.db
+logs/
+
 # Python Cache
 **/__pycache__/
 *.pyc
@@ -16,6 +20,11 @@ output/
 .venv/
 venv/
 ENV/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
 
 # OS Files
 .DS_Store

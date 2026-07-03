@@ -1,13 +1,17 @@
 import sqlite3
 import os
 import threading
+from websync.core.paths import PROJECT_ROOT, resolve_path
 
 class SyncHistoryDb:
     """이미 기기로 전송(동기화) 완료된 게시글/포스트 이력을 관리하는 SQLite DB 클래스"""
     _db_lock = threading.Lock() # 스레드 간 DB 접근 Race Condition 차단을 위한 락
 
-    def __init__(self, db_path="sync_history.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            self.db_path = os.path.join(PROJECT_ROOT, "sync_history.db")
+        else:
+            self.db_path = resolve_path(db_path)
         self._init_db()
 
     def _init_db(self):
@@ -108,4 +112,3 @@ class SyncHistoryDb:
                     return row[0] if row else 0
             except Exception:
                 return 0
-

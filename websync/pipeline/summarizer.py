@@ -1,4 +1,5 @@
 """AI 기사 요약 모듈 (OpenAI API 또는 Ollama 로컬 LLM 지원)"""
+import html
 import re
 
 
@@ -8,7 +9,7 @@ class Summarizer:
     def __init__(self, config: dict):
         ai_cfg = config.get("ai_summary", {})
         self.enabled = ai_cfg.get("enabled", False)
-        self.provider = ai_cfg.get("provider", "openai")  # 'openai' | 'ollama'
+        self.provider = ai_cfg.get("provider", "openai")
         self.api_key = ai_cfg.get("api_key", "")
         self.ollama_host = ai_cfg.get("ollama_host", "http://localhost:11434")
         self.model = ai_cfg.get("model", "gpt-4o-mini")
@@ -21,13 +22,15 @@ class Summarizer:
         return True
 
     def _extract_text(self, html_content: str) -> str:
-        """HTML 태그 제거 후 순수 텍스트 추출"""
         text = re.sub(r"<[^>]+>", " ", html_content)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:3000]  # 토큰 절약을 위해 최대 3000자
+        return text[:3000]
+
+    def _format_summary(self, summary: str) -> str:
+        safe = html.escape(summary, quote=False).replace("\n", "<br/>")
+        return f'<blockquote class="ai-summary"><strong>📝 AI 요약</strong><br/>{safe}</blockquote>'
 
     def summarize(self, title: str, html_content: str) -> str:
-        """기사를 요약해 HTML blockquote 형태로 반환. 실패 시 빈 문자열."""
         if not self.is_available():
             return ""
         try:
@@ -59,7 +62,7 @@ class Summarizer:
         with urllib.request.urlopen(req, timeout=20) as resp:
             result = json.loads(resp.read())
         summary = result["choices"][0]["message"]["content"].strip()
-        return f'<blockquote class="ai-summary"><strong>📝 AI 요약</strong><br/>{summary}</blockquote>'
+        return self._format_summary(summary)
 
     def _call_ollama(self, prompt: str) -> str:
         import urllib.request
@@ -74,4 +77,4 @@ class Summarizer:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
         summary = result.get("response", "").strip()
-        return f'<blockquote class="ai-summary"><strong>📝 AI 요약</strong><br/>{summary}</blockquote>'
+        return self._format_summary(summary)

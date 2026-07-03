@@ -1,18 +1,20 @@
 import os
+import hashlib
 import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from calibre import CalibreManager
-from uploader import X3Uploader
-from scheduler import SchedulerManager
-from notifier import ToastNotifier
-from service import SyncService
-from opds_server import OPDSServer
-from watcher import CalibreWatcher
-from web_api import WebDashboard
-from logger import get_log_dir
+from websync.integrations.calibre import CalibreManager
+from websync.core.paths import resolve_path
+from websync.upload.uploader import X3Uploader
+from websync.scheduler.manager import SchedulerManager
+from websync.integrations.notifier import ToastNotifier
+from websync.pipeline.service import SyncService
+from websync.servers.opds import OPDSServer
+from websync.watch.calibre import CalibreWatcher
+from websync.servers.web_dashboard import WebDashboard
+from websync.core.logger import get_log_dir
 
 class SyncAppGui:
     """Tkinter를 기반으로 탭형 인터페이스를 제공하고 비즈니스 흐름을 연동하는 클래스"""
@@ -25,6 +27,7 @@ class SyncAppGui:
         self._opds_server: OPDSServer | None = None
         self._web_dashboard: WebDashboard | None = None
         self._calibre_watcher: CalibreWatcher | None = None
+        self._history_url_by_iid: dict[str, str] = {}
 
         self.root = tk.Tk()
         self.root.title("Xteink X3 WebSync Manager")
@@ -129,6 +132,20 @@ class SyncAppGui:
         self.dir_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=6, sticky="we")
         ttk.Button(settings_frame, text="폴더 선택", command=self._browse_directory).grid(row=1, column=3, padx=5, pady=6)
         ttk.Button(settings_frame, text="📂 열기", command=self._open_output_folder).grid(row=1, column=4, padx=5, pady=6)
+
+        devices_frame = ttk.LabelFrame(self.tab_sync, text=" 추가 X3 기기 (다중 무선 전송) ")
+        devices_frame.pack(fill="x", padx=15, pady=5)
+        self.devices_tree = ttk.Treeview(devices_frame, columns=("name", "ip"), show="headings", height=3)
+        self.devices_tree.heading("name", text="기기 이름")
+        self.devices_tree.heading("ip", text="IP/호스트")
+        self.devices_tree.column("name", width=180)
+        self.devices_tree.column("ip", width=220)
+        self.devices_tree.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+        dev_btn = ttk.Frame(devices_frame)
+        dev_btn.pack(side="right", padx=10, pady=8)
+        ttk.Button(dev_btn, text="기기 추가", command=self._add_device_popup).pack(fill="x", pady=2)
+        ttk.Button(dev_btn, text="선택 삭제", command=self._remove_device).pack(fill="x", pady=2)
+        ttk.Label(devices_frame, text="기본 X3 주소 외 추가 기기를 등록하면 동기화 시 모든 기기로 전송합니다.", font=("Malgun Gothic", 8), foreground="#6c757d").pack(side="bottom", padx=10, pady=(0, 6))
 
         # 폰트 설정
         font_frame = ttk.LabelFrame(self.tab_sync, text=" 한국어 가독성 스타일 최적화 (EPUB 포맷팅) ")
@@ -286,7 +303,9 @@ class SyncAppGui:
         self.opds_url_label = ttk.Label(opds_frame, text="", foreground=self.ACCENT_COLOR, cursor="hand2")
         self.opds_url_label.grid(row=0, column=4, padx=10, pady=8, sticky="w")
         self.opds_url_label.bind("<Button-1>", lambda e: self._open_url(self.opds_url_label.cget("text")))
-        ttk.Label(opds_frame, text="X3 기기 OPDS 클라이언트에서 위 주소로 접속하면 생성된 EPUB 목록을 바로 다운로드할 수 있습니다.", font=("Malgun Gothic", 8), foreground="#a6adc8").grid(row=1, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        self.opds_allow_lan_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opds_frame, text="LAN 공개 (0.0.0.0)", variable=self.opds_allow_lan_var).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 8), sticky="w")
+        ttk.Label(opds_frame, text="기본은 localhost만 허용. LAN 공개 시 같은 네트워크에서 EPUB 다운로드 가능.", font=("Malgun Gothic", 8), foreground="#6c757d").grid(row=2, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
 
         # 웹 대시보드
         web_frame = ttk.LabelFrame(self.tab_server, text=" 🌐 웹 대시보드 ")
@@ -302,6 +321,10 @@ class SyncAppGui:
         self.web_url_label = ttk.Label(web_frame, text="", foreground=self.ACCENT_COLOR, cursor="hand2")
         self.web_url_label.grid(row=0, column=4, padx=10, pady=8, sticky="w")
         self.web_url_label.bind("<Button-1>", lambda e: self._open_url(self.web_url_label.cget("text")))
+        self.web_allow_lan_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(web_frame, text="LAN 공개 (0.0.0.0)", variable=self.web_allow_lan_var).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 8), sticky="w")
+        self.web_token_label = ttk.Label(web_frame, text="", font=("Consolas", 8), foreground="#6c757d")
+        self.web_token_label.grid(row=2, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
 
         # Calibre Watch
         watch_frame = ttk.LabelFrame(self.tab_server, text=" 👁 Calibre 서재 자동 감시 (새 파일 추가 시 자동 전송) ")
@@ -346,6 +369,7 @@ class SyncAppGui:
         self.trans_provider_cb.set("googletrans")
 
         ttk.Button(trans_frame, text="저장", command=self._save_trans_settings).grid(row=0, column=3, padx=10, pady=6)
+        ttk.Label(trans_frame, text="※ googletrans: 사이트별 '번역'만 설정해도 동작. libretranslate: 전역 활성화 필요.", font=("Malgun Gothic", 8), foreground="#6c757d").grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 6), sticky="w")
 
         # 로그 폴더 열기
         log_frame = ttk.LabelFrame(self.tab_server, text=" 📂 로그 파일 ")
@@ -396,6 +420,12 @@ class SyncAppGui:
             except Exception:
                 pass
 
+    def _make_log_callback(self):
+        return lambda msg: self.root.after(0, lambda m=msg: self._log_message(m))
+
+    def _make_progress_callback(self):
+        return lambda cur, tot: self.root.after(0, lambda c=cur, t=tot: self._update_progress(c, t))
+
     # ------------------------------------------------------------------
     # 설정 로드 / 저장
     # ------------------------------------------------------------------
@@ -416,9 +446,15 @@ class SyncAppGui:
         # OPDS / Web 포트
         opds_conf = config.get("opds_server", {})
         self.opds_port_sp.set(str(opds_conf.get("port", 8765)))
+        self.opds_allow_lan_var.set(opds_conf.get("allow_lan", False))
 
         web_conf = config.get("web_dashboard", {})
         self.web_port_sp.set(str(web_conf.get("port", 8766)))
+        self.web_allow_lan_var.set(web_conf.get("allow_lan", False))
+        token = web_conf.get("api_token", "")
+        self.web_token_label.config(text=f"API 토큰: {token[:8]}... (config.json)" if token else "")
+
+        self._refresh_devices_tree()
 
         # Calibre Watch 폴더
         watch_conf = config.get("calibre_watch", {})
@@ -457,8 +493,19 @@ class SyncAppGui:
             config["line_height"] = 1.7
         config["schedule"]["hour"] = self.hour_cb.get()
         config["schedule"]["minute"] = self.min_cb.get()
+        try:
+            config.setdefault("opds_server", {})["port"] = int(self.opds_port_sp.get())
+            config["opds_server"]["allow_lan"] = self.opds_allow_lan_var.get()
+        except ValueError:
+            pass
+        try:
+            config.setdefault("web_dashboard", {})["port"] = int(self.web_port_sp.get())
+            config["web_dashboard"]["allow_lan"] = self.web_allow_lan_var.get()
+        except ValueError:
+            pass
         self.service.config_manager.save_config(config)
         self.calibre.calibre_path = config["calibre_path"]
+        self.service._reload_config()
 
     def _save_ai_settings(self):
         config = self.service.config
@@ -681,6 +728,70 @@ class SyncAppGui:
             messagebox.showerror("오류", "전송에 실패했습니다. 기기 연결 상태를 확인하세요.")
 
     # ------------------------------------------------------------------
+    # 다중 기기 관리
+    # ------------------------------------------------------------------
+    def _refresh_devices_tree(self):
+        for item in self.devices_tree.get_children():
+            self.devices_tree.delete(item)
+        for idx, dev in enumerate(self.service.config.get("x3_devices", [])):
+            self.devices_tree.insert("", "end", iid=str(idx), values=(
+                dev.get("name", ""), dev.get("ip", "")
+            ))
+
+    def _add_device_popup(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("X3 기기 추가")
+        dialog.geometry("360x160")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        frame = ttk.Frame(dialog, padding=15)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="기기 이름:").grid(row=0, column=0, sticky="w", pady=6)
+        name_entry = ttk.Entry(frame, width=28)
+        name_entry.grid(row=0, column=1, pady=6)
+        ttk.Label(frame, text="IP/호스트:").grid(row=1, column=0, sticky="w", pady=6)
+        ip_entry = ttk.Entry(frame, width=28)
+        ip_entry.grid(row=1, column=1, pady=6)
+
+        def save():
+            name = name_entry.get().strip()
+            ip = ip_entry.get().strip()
+            if not name or not ip:
+                messagebox.showerror("오류", "이름과 IP를 모두 입력해 주세요.", parent=dialog)
+                return
+            config = self.service.config
+            devices = config.setdefault("x3_devices", [])
+            if any(d.get("ip") == ip for d in devices):
+                messagebox.showwarning("중복", "이미 등록된 IP입니다.", parent=dialog)
+                return
+            devices.append({"name": name, "ip": ip})
+            self.service.config_manager.save_config(config)
+            self.service._reload_config()
+            self._refresh_devices_tree()
+            dialog.destroy()
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill="x", pady=8)
+        ttk.Button(btn_frame, text="저장", command=save).pack(side="right", padx=10)
+        ttk.Button(btn_frame, text="취소", command=dialog.destroy).pack(side="right")
+
+    def _remove_device(self):
+        selected = self.devices_tree.selection()
+        if not selected:
+            messagebox.showwarning("경고", "삭제할 기기를 선택해 주세요.")
+            return
+        config = self.service.config
+        devices = config.get("x3_devices", [])
+        indices = sorted([int(i) for i in selected], reverse=True)
+        for idx in indices:
+            if 0 <= idx < len(devices):
+                devices.pop(idx)
+        config["x3_devices"] = devices
+        self.service.config_manager.save_config(config)
+        self.service._reload_config()
+        self._refresh_devices_tree()
+
+    # ------------------------------------------------------------------
     # 사이트 관리
     # ------------------------------------------------------------------
     def _refresh_site_tree(self):
@@ -853,9 +964,12 @@ class SyncAppGui:
     def _refresh_history(self):
         for item in self.hist_tree.get_children():
             self.hist_tree.delete(item)
+        self._history_url_by_iid.clear()
         rows = self.service.db.get_history(limit=200)
         for url, site_name, title, synced_at in rows:
-            self.hist_tree.insert("", "end", iid=url, values=(
+            iid = hashlib.sha256((url or "").encode("utf-8")).hexdigest()[:24]
+            self._history_url_by_iid[iid] = url
+            self.hist_tree.insert("", "end", iid=iid, values=(
                 site_name or "", title or "", synced_at or "", url or ""
             ))
         count = self.service.db.get_count()
@@ -868,7 +982,8 @@ class SyncAppGui:
             return
         if not messagebox.askyesno("확인", f"{len(selected)}개 항목을 삭제하면 다음 동기화 시 재수집됩니다. 계속할까요?"):
             return
-        for url in selected:
+        for iid in selected:
+            url = self._history_url_by_iid.get(iid, iid)
             self.service.db.delete_entry(url)
         self._refresh_history()
         self._log_message(f"🗑 이력 {len(selected)}건 삭제 완료 (재전송 허용)")
@@ -895,8 +1010,9 @@ class SyncAppGui:
                 port = int(self.opds_port_sp.get())
             except ValueError:
                 port = 8765
-            output_dir = self.dir_entry.get().strip() or "./output"
-            self._opds_server = OPDSServer(output_dir=output_dir, port=port)
+            output_dir = resolve_path(self.dir_entry.get().strip() or "./output")
+            bind_host = "0.0.0.0" if self.opds_allow_lan_var.get() else "127.0.0.1"
+            self._opds_server = OPDSServer(output_dir=output_dir, port=port, bind_host=bind_host)
             if self._opds_server.start():
                 self.opds_start_btn.config(text="■ 서버 중지")
                 self.opds_status_label.config(text="실행 중 ✅", foreground=self.GREEN_COLOR)
@@ -919,12 +1035,21 @@ class SyncAppGui:
             except ValueError:
                 port = 8766
 
-            def sync_cb():
-                self.service.run_sync_pipeline(
-                    log_callback=lambda msg: self.root.after(0, lambda: self._log_message(msg))
-                )
+            config = self.service.config_manager.load_config()
+            web_conf = config.get("web_dashboard", {})
+            api_token = web_conf.get("api_token", "")
+            bind_host = "0.0.0.0" if self.web_allow_lan_var.get() else "127.0.0.1"
 
-            self._web_dashboard = WebDashboard(port=port, sync_callback=sync_cb)
+            def sync_cb():
+                self.service.run_sync_pipeline(log_callback=self._make_log_callback())
+
+            self._web_dashboard = WebDashboard(
+                port=port,
+                bind_host=bind_host,
+                api_token=api_token,
+                sync_callback=sync_cb,
+                pipeline_busy_callback=self.service.is_pipeline_running,
+            )
             if self._web_dashboard.start():
                 self.web_start_btn.config(text="■ 서버 중지")
                 self.web_status_label.config(text="실행 중 ✅", foreground=self.GREEN_COLOR)
@@ -952,7 +1077,7 @@ class SyncAppGui:
                 def upload_task():
                     ok = X3Uploader(ip).upload(fpath)
                     msg = f"🎉 자동 전송 성공: {os.path.basename(fpath)}" if ok else f"❌ 자동 전송 실패: {os.path.basename(fpath)}"
-                    self.root.after(0, lambda: self._log_message(msg))
+                    self.root.after(0, lambda m=msg: self._log_message(m))
                 threading.Thread(target=upload_task, daemon=True).start()
 
             self._calibre_watcher = CalibreWatcher(watch_dir, on_new_file)
@@ -978,8 +1103,8 @@ class SyncAppGui:
 
         def run():
             self.service.run_sync_pipeline(
-                log_callback=lambda msg: self.root.after(0, lambda: self._log_message(msg)),
-                progress_callback=lambda cur, tot: self.root.after(0, lambda: self._update_progress(cur, tot))
+                log_callback=self._make_log_callback(),
+                progress_callback=self._make_progress_callback(),
             )
             self.root.after(0, self._sync_finished_ui)
 

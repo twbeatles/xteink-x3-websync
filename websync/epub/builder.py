@@ -1,7 +1,9 @@
 import os
 import io
+import html
 from datetime import datetime
 from ebooklib import epub
+from bs4 import BeautifulSoup
 
 class EpubBuilder:
     """수집된 기사 데이터를 받아 EPUB 파일로 빌드하는 역할을 전담하는 클래스"""
@@ -10,6 +12,16 @@ class EpubBuilder:
         self.font_family = font_family
         self.font_size = font_size
         self.line_height = line_height
+
+    @staticmethod
+    def _sanitize_body_html(content: str) -> str:
+        """본문 HTML에서 script/style 제거 후 반환합니다."""
+        if not content:
+            return ""
+        soup = BeautifulSoup(content, "html.parser")
+        for tag in soup.find_all(["script", "style"]):
+            tag.decompose()
+        return str(soup)
 
     def _make_cover_image(self, site_name: str, article_count: int, today_str: str) -> bytes | None:
         """Pillow를 사용해 EPUB 표지 이미지를 동적으로 생성. Pillow 미설치 시 None 반환."""
@@ -21,7 +33,6 @@ class EpubBuilder:
             img = Image.new("RGB", (W, H), color="#1e1e2e")
             draw = ImageDraw.Draw(img)
 
-            # 배경 그라디언트 효과 (수동 직사각형)
             for y in range(H):
                 ratio = y / H
                 r = int(0x1e + (0x31 - 0x1e) * ratio)
@@ -29,7 +40,6 @@ class EpubBuilder:
                 b = int(0x2e + (0x44 - 0x2e) * ratio)
                 draw.line([(0, y), (W, y)], fill=(r, g, b))
 
-            # 폰트 (시스템 기본 폰트 사용)
             try:
                 font_title = ImageFont.truetype("malgunbd.ttf", 48)
                 font_sub   = ImageFont.truetype("malgun.ttf", 28)
@@ -39,20 +49,11 @@ class EpubBuilder:
                 font_sub   = font_title
                 font_small = font_title
 
-            # 상단 강조선
             draw.rectangle([40, 80, W - 40, 85], fill="#89b4fa")
-
-            # 사이트명 (자동 줄바꿈)
             wrapped = textwrap.fill(site_name, width=12)
             draw.multiline_text((W // 2, 160), wrapped, font=font_title, fill="#cdd6f4", anchor="mm", align="center")
-
-            # 날짜
             draw.text((W // 2, H // 2 - 20), today_str, font=font_sub, fill="#89b4fa", anchor="mm")
-
-            # 기사 건수
             draw.text((W // 2, H // 2 + 40), f"기사 {article_count}건", font=font_small, fill="#a6e3a1", anchor="mm")
-
-            # 하단 강조선
             draw.rectangle([40, H - 85, W - 40, H - 80], fill="#89b4fa")
             draw.text((W // 2, H - 55), "X3 WebSync", font=font_small, fill="#585b70", anchor="mm")
 
@@ -74,12 +75,15 @@ class EpubBuilder:
         file_name = f"{safe_site_name}_{today_str}.epub"
         file_path = os.path.join(self.output_dir, file_name)
 
+        if os.path.exists(file_path):
+            time_suffix = datetime.now().strftime("%H%M%S")
+            file_name = f"{safe_site_name}_{today_str}_{time_suffix}.epub"
+            file_path = os.path.join(self.output_dir, file_name)
+
         book = epub.EpubBook()
         book.set_title(f"{site_name} ({today_str})")
-        # 한국어 텍스트 메타데이터 완벽 적용
         book.set_language("ko")
 
-        # --- 표지 이미지 생성 및 등록 ---
         if generate_cover:
             cover_bytes = self._make_cover_image(site_name, len(articles), today_str)
             if cover_bytes:
@@ -95,7 +99,6 @@ class EpubBuilder:
         spine = ["nav"]
         toc = []
 
-        # 한국어 폰트 및 가독성을 극대화한 e-ink 맞춤형 CSS 정의
         custom_css = f"""
         body {{
             font-family: {self.font_family}, serif, sans-serif;
@@ -130,29 +133,30 @@ class EpubBuilder:
         """
 
         for idx, art in enumerate(articles):
+            safe_title = html.escape(art.get("title", ""), quote=True)
+            summary_html = art.get("summary_html", "")
+            body_html = self._sanitize_body_html(art.get("content", ""))
+
             chapter = epub.EpubHtml(
-                title=art["title"],
+                title=art.get("title", f"Chapter {idx+1}"),
                 file_name=f"chap_{idx+1}.xhtml",
                 lang="ko"
             )
-            # AI 요약문이 있으면 본문 앞에 삽입
-            summary_html = art.get("summary_html", "")
-            # 메타태그에 UTF-8 인코딩 선언 명시하여 한글 깨짐 방지
             chapter.content = f"""
             <?xml version="1.0" encoding="utf-8"?>
             <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
             <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko">
             <head>
                 <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8" />
-                <title>{art['title']}</title>
+                <title>{safe_title}</title>
                 <style>
                     {custom_css}
                 </style>
             </head>
             <body>
-                <h1>{art['title']}</h1>
+                <h1>{safe_title}</h1>
                 {summary_html}
-                {art['content']}
+                {body_html}
             </body>
             </html>
             """

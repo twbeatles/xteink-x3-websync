@@ -3,17 +3,27 @@ import re
 
 
 class Translator:
-    """기사 HTML을 지정 언어로 번역하는 클래스. 설정 없으면 자동 스킵."""
+    """기사 HTML을 지정 언어로 번역하는 클래스."""
 
     def __init__(self, config: dict):
         cfg = config.get("translation", {})
         self.enabled = cfg.get("enabled", False)
-        self.provider = cfg.get("provider", "googletrans")  # 'googletrans' | 'libretranslate'
+        self.provider = cfg.get("provider", "googletrans")
         self.libretranslate_host = cfg.get("libretranslate_host", "http://localhost:5000")
         self.libretranslate_api_key = cfg.get("libretranslate_api_key", "")
         self._gtrans = None
 
     def is_available(self) -> bool:
+        return self.enabled
+
+    def is_available_for_site(self, translate_to: str) -> bool:
+        """사이트별 translate_to가 설정된 경우 번역 가능 여부를 판단합니다."""
+        if not (translate_to or "").strip():
+            return False
+        if self.provider == "libretranslate":
+            return self.enabled
+        if self.provider == "googletrans":
+            return self._get_gtrans() is not None
         return self.enabled
 
     def _get_gtrans(self):
@@ -27,10 +37,9 @@ class Translator:
 
     def translate_html(self, html_content: str, target_lang: str = "ko", source_lang: str = "auto") -> str:
         """HTML 내 텍스트 노드만 번역. 태그 구조는 보존."""
-        if not self.is_available():
+        if not target_lang:
             return html_content
         try:
-            # 텍스트 블록 단위 추출 (태그 사이 텍스트)
             parts = re.split(r"(<[^>]+>)", html_content)
             translated_parts = []
             for part in parts:
@@ -58,7 +67,12 @@ class Translator:
         elif self.provider == "libretranslate":
             import urllib.request
             import json
-            payload = {"q": text, "source": source if source != "auto" else "en", "target": target, "api_key": self.libretranslate_api_key}
+            payload = {
+                "q": text,
+                "source": source if source != "auto" else "en",
+                "target": target,
+                "api_key": self.libretranslate_api_key
+            }
             req = urllib.request.Request(
                 f"{self.libretranslate_host}/translate",
                 data=json.dumps(payload).encode(),

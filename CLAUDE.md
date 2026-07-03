@@ -22,27 +22,52 @@
 
 ```
 xteink-x3-websync/
-├── x3_websync.py         # 진입점 (Entrypoint) — CLI/GUI 분기, 단일 인스턴스 락
-├── config_manager.py     # 설정 파일 CRUD — threading.Lock 보호, 결손 키 자동 보강
-├── service.py            # 동기화 파이프라인 오케스트레이터 (비즈니스 로직 핵심)
-├── scrapers.py           # 콘텐츠 수집기 — CSS / RSS / 네이버 전용 (팩토리 패턴)
-├── builder.py            # EPUB 빌더 — e-ink 맞춤 CSS, UTF-8 한국어 지원
-├── uploader.py           # 기기 무선 업로드 — 파일명 세니타이징, 가변 타임아웃
-├── calibre.py            # Calibre DB 연동 — calibredb.exe 래퍼
-├── scheduler.py          # 윈도우 작업 스케줄러 제어 — 경로 고정, 인젝션 방어
-├── notifier.py           # 윈도우 토스트 알림 — 매개변수 분리형 안전 구현
-├── db_manager.py         # SQLite 동기화 이력 — threading.Lock, timeout=10.0
-├── gui.py                # Tkinter 다크 테마 GUI — 탭 인터페이스
+├── x3_websync.py              # 진입점 — CLI/GUI 분기, 단일 인스턴스 락
+├── x3_websync.spec            # PyInstaller 빌드 스펙
+├── websync/                   # 메인 패키지 (SOLID 기반 역할별 분리)
+│   ├── core/
+│   │   ├── paths.py           # 프로젝트 루트 기준 경로 해석 (PROJECT_ROOT)
+│   │   ├── article.py         # 기사 URL / synthetic key 유틸
+│   │   └── logger.py          # 날짜별 로그 파일
+│   ├── config/
+│   │   └── manager.py         # config.json CRUD — threading.Lock, deep merge
+│   ├── db/
+│   │   └── history.py         # SQLite 동기화 이력 — timeout=10.0
+│   ├── scrapers/
+│   │   ├── base.py            # BaseScraper, 공통 유틸
+│   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py
+│   │   └── factory.py         # ScraperFactory (OCP: register_scraper)
+│   ├── epub/
+│   │   └── builder.py         # EPUB 빌더 — e-ink CSS, UTF-8 한국어
+│   ├── upload/
+│   │   └── uploader.py        # 기기 무선 업로드 — 세니타이징, 다중 기기
+│   ├── pipeline/
+│   │   ├── service.py         # 동기화 파이프라인 오케스트레이터
+│   │   ├── summarizer.py      # AI 요약
+│   │   └── translator.py      # 번역
+│   ├── integrations/
+│   │   ├── calibre.py         # calibredb.exe 래퍼
+│   │   └── notifier.py        # 윈도우 토스트 알림
+│   ├── scheduler/
+│   │   └── manager.py         # schtasks / launchd / crontab
+│   ├── servers/
+│   │   ├── opds.py            # OPDS HTTP 서버
+│   │   └── web_dashboard.py   # 웹 대시보드 (API 토큰 인증)
+│   ├── watch/
+│   │   └── calibre.py         # Calibre 폴더 감시 (watchdog)
+│   └── gui/
+│       └── app.py             # Tkinter 다크 테마 GUI
 │
-├── config.json           # 사용자 설정 (gitignore 적용)
-├── sync_history.db       # 전송 이력 SQLite DB (gitignore 적용)
-├── output/               # 생성된 EPUB 저장 디렉토리 (gitignore 적용)
-│
-├── README.md             # 사용자용 설명서
-├── PROJECT_AUDIT.md      # 보안·기능 감사 보고서 (이미 반영 완료)
-├── CLAUDE.md             # 본 문서: 개발자 구조 분석 + 기능 확장 가이드
-├── pyrightconfig.json    # Pyright 정적 타입 검사 설정
-└── .gitignore            # 민감 파일 배포 제외
+├── config.json                # 사용자 설정 (gitignore)
+├── sync_history.db            # 전송 이력 DB (gitignore)
+├── output/                    # 생성 EPUB (gitignore)
+├── logs/                      # 실행 로그 (gitignore)
+├── tests/                     # pytest
+├── scripts/                   # migrate_to_package.py, verify_migration.py
+├── requirements.txt
+├── README.md / PROJECT_AUDIT.md / CLAUDE.md
+├── pyrightconfig.json
+└── .gitignore
 ```
 
 ---
@@ -70,7 +95,7 @@ main()
 
 ---
 
-### 3-2. `config_manager.py` — 설정 관리자
+### 3-2. `websync/config/manager.py` — 설정 관리자
 
 | 항목 | 내용 |
 |------|------|
@@ -110,7 +135,7 @@ main()
 
 ---
 
-### 3-3. `service.py` — 동기화 파이프라인 오케스트레이터
+### 3-3. `websync/pipeline/service.py` — 동기화 파이프라인 오케스트레이터
 
 | 항목 | 내용 |
 |------|------|
@@ -134,7 +159,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-4. `scrapers.py` — 콘텐츠 수집기 (팩토리 패턴)
+### 3-4. `websync/scrapers/` — 콘텐츠 수집기 (팩토리 패턴)
 
 | 클래스 | 타입 | 방식 |
 |--------|------|------|
@@ -152,7 +177,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-5. `builder.py` — EPUB 빌더
+### 3-5. `websync/epub/builder.py` — EPUB 빌더
 
 | 항목 | 내용 |
 |------|------|
@@ -164,7 +189,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-6. `uploader.py` — 기기 무선 업로드
+### 3-6. `websync/upload/uploader.py` — 기기 무선 업로드
 
 | 항목 | 내용 |
 |------|------|
@@ -175,7 +200,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-7. `calibre.py` — Calibre 연동
+### 3-7. `websync/integrations/calibre.py` — Calibre 연동
 
 | 항목 | 내용 |
 |------|------|
@@ -185,7 +210,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-8. `scheduler.py` — 스케줄러
+### 3-8. `websync/scheduler/manager.py` — 스케줄러
 
 | 항목 | 내용 |
 |------|------|
@@ -195,7 +220,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-9. `notifier.py` — 알림
+### 3-9. `websync/integrations/notifier.py` — 알림
 
 | 항목 | 내용 |
 |------|------|
@@ -204,7 +229,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-10. `db_manager.py` — SQLite 이력 DB
+### 3-10. `websync/db/history.py` — SQLite 이력 DB
 
 | 항목 | 내용 |
 |------|------|
@@ -214,7 +239,7 @@ run_sync_pipeline()
 
 ---
 
-### 3-11. `gui.py` — GUI
+### 3-11. `websync/gui/app.py` — GUI
 
 | 항목 | 내용 |
 |------|------|
@@ -357,19 +382,21 @@ run_sync_pipeline()
 
 ## 6. 새 스크래퍼 추가 방법 (개발 가이드)
 
-`scrapers.py`에 새 스크래퍼를 추가하는 것은 3단계면 충분합니다:
+`websync/scrapers/`에 새 스크래퍼를 추가하는 것은 4단계면 충분합니다:
 
 ```python
-# 1. BaseScraper를 상속하여 클래스 작성
+# 1. websync/scrapers/my_type.py — BaseScraper 상속
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images
+
 class MyScraper(BaseScraper):
     def fetch_articles(self, site_config: dict) -> list:
-        # 수집 로직 구현
         return [{"title": "제목", "content": "<p>본문HTML</p>", "url": "고유URL"}]
 
-# 2. ScraperFactory에 등록
-ScraperFactory._scrapers["my_type"] = MyScraper()
+# 2. websync/scrapers/factory.py — _scrapers dict에 등록
+from websync.scrapers.my_type import MyScraper
+_scrapers["my_type"] = MyScraper()
 
-# 3. gui.py의 type_cb Combobox values 에 "my_type" 추가
+# 3. websync/gui/app.py — type_cb Combobox values에 "my_type" 추가
 type_cb = ttk.Combobox(frame, values=["css", "rss", "naver", "my_type"], ...)
 ```
 
@@ -421,13 +448,14 @@ DEFAULT_CONFIG = {
 
 | 증상 | 원인 | 해결책 |
 |------|------|--------|
-| 스케줄러 실행 후 동기화 안됨 | 작업 경로 유실 → config.json 못 읽음 | `scheduler.py`의 `cd /d` 경로 확인 |
-| `database is locked` 오류 | 동시 동기화 실행 | `db_manager.py`의 `timeout=10.0` 및 Lock 확인 |
+| 스케줄러 실행 후 동기화 안됨 | 작업 경로 유실 → config.json 못 읽음 | `websync/scheduler/manager.py`의 `cd /d` 경로 확인 |
+| `database is locked` 오류 | 동시 동기화 실행 | `websync/db/history.py`의 `timeout=10.0` 및 Lock 확인 |
 | 네이버 포스트 본문 없음 | `div.se-main-container` 미발견 | `#postViewArea` 폴백 확인, 네이버 HTML 구조 변경 여부 점검 |
-| CrossPoint 기기 크래시 | 한글/공백 파일명 전송 | `uploader.py` 세니타이징 로직 확인 |
-| EPUB 한글 깨짐 | 인코딩 문제 | `builder.py`의 UTF-8 메타 선언 확인 |
+| CrossPoint 기기 크래시 | 한글/공백 파일명 전송 | `websync/upload/uploader.py` 세니타이징 로직 확인 |
+| EPUB 한글 깨짐 | 인코딩 문제 | `websync/epub/builder.py`의 UTF-8 메타 선언 확인 |
 | pythonw 실행 후 아무 일도 없음 | stdout=None 크래시 | `x3_websync.py`의 `NullWriter` 확인 |
-| 동시 기동 시 config.json 손상 | Race Condition | `config_manager.py`의 `threading.Lock` 확인 |
+| 동시 기동 시 config.json 손상 | Race Condition | `websync/config/manager.py`의 `threading.Lock` 확인 |
+| PyInstaller 빌드 후 import 오류 | hiddenimports 누락 | `x3_websync.spec`의 `websync.*` 서브패키지 목록 확인 |
 
 ---
 
