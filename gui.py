@@ -45,14 +45,15 @@ class SyncAppGui:
         self.style = ttk.Style()
         self.style.theme_use('clam')
 
-        self.BG_COLOR      = "#1e1e2e"
-        self.FG_COLOR      = "#cdd6f4"
-        self.ACCENT_COLOR  = "#89b4fa"
-        self.SECONDARY_BG  = "#313244"
-        self.TEXT_BG       = "#181825"
-        self.GREEN_COLOR   = "#a6e3a1"
-        self.RED_COLOR     = "#f38ba8"
-        self.YELLOW_COLOR  = "#f9e2af"
+        # 라이트 테마 색상 정의 (Clean Light Theme)
+        self.BG_COLOR      = "#f8f9fa" # 연한 회색 배경
+        self.FG_COLOR      = "#212529" # 어두운 텍스트
+        self.ACCENT_COLOR  = "#0d6efd" # 파란색 포인트
+        self.SECONDARY_BG  = "#e9ecef" # 비활성 탭 및 서브 프레임 배경
+        self.TEXT_BG       = "#ffffff" # 입력 필드, 리스트 박스 배경
+        self.GREEN_COLOR   = "#198754" # 상태 양호 초록색
+        self.RED_COLOR     = "#dc3545" # 에러 빨간색
+        self.YELLOW_COLOR  = "#fd7e14" # 미확인/대기 주황색
 
         self.root.configure(bg=self.BG_COLOR)
         self.style.configure(".", background=self.BG_COLOR, foreground=self.FG_COLOR, font=("Malgun Gothic", 9))
@@ -66,15 +67,25 @@ class SyncAppGui:
         self.style.configure("TLabelframe", background=self.BG_COLOR, foreground=self.ACCENT_COLOR, bordercolor=self.SECONDARY_BG)
         self.style.configure("TLabelframe.Label", background=self.BG_COLOR, foreground=self.ACCENT_COLOR, font=("Malgun Gothic", 10, "bold"))
         self.style.configure("TLabel", background=self.BG_COLOR, foreground=self.FG_COLOR)
+        
+        # 버튼 스타일 정의
         self.style.configure("TButton", background=self.SECONDARY_BG, foreground=self.FG_COLOR, bordercolor=self.SECONDARY_BG, relief="flat", padding=5)
         self.style.map("TButton",
             background=[("active", self.ACCENT_COLOR), ("disabled", self.SECONDARY_BG)],
-            foreground=[("active", self.BG_COLOR), ("disabled", "#585b70")]
+            foreground=[("active", "#ffffff"), ("disabled", "#adb5bd")]
         )
+        
+        # 입력 필드, 드롭다운, 스핀박스 스타일 강제 재정의 (가독성 문제 완전 해결)
+        self.style.configure("TEntry", fieldbackground=self.TEXT_BG, foreground=self.FG_COLOR, insertcolor=self.FG_COLOR, bordercolor=self.SECONDARY_BG)
+        self.style.configure("TCombobox", fieldbackground=self.TEXT_BG, foreground=self.FG_COLOR, background=self.SECONDARY_BG, arrowcolor=self.FG_COLOR, bordercolor=self.SECONDARY_BG)
+        self.style.configure("TSpinbox", fieldbackground=self.TEXT_BG, foreground=self.FG_COLOR, background=self.SECONDARY_BG, arrowcolor=self.FG_COLOR, bordercolor=self.SECONDARY_BG)
+
+        # 트리뷰 스타일 정의
         self.style.configure("Treeview", background=self.TEXT_BG, fieldbackground=self.TEXT_BG, foreground=self.FG_COLOR, bordercolor=self.SECONDARY_BG, rowheight=24)
-        self.style.map("Treeview", background=[("selected", self.ACCENT_COLOR)], foreground=[("selected", self.BG_COLOR)])
+        self.style.map("Treeview", background=[("selected", self.ACCENT_COLOR)], foreground=[("selected", "#ffffff")])
         self.style.configure("Treeview.Heading", background=self.SECONDARY_BG, foreground=self.FG_COLOR, bordercolor=self.SECONDARY_BG, font=("Malgun Gothic", 9, "bold"))
         self.style.configure("TProgressbar", troughcolor=self.SECONDARY_BG, background=self.ACCENT_COLOR, thickness=8)
+
 
     # ------------------------------------------------------------------
     # UI 빌드
