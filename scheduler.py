@@ -33,13 +33,16 @@ class SchedulerManager:
 
     def _register_windows(self, h_val: int, m_val: int) -> bool:
         """Windows schtasks 기반 등록"""
-        python_exe = sys.executable
-        pythonw_exe = python_exe.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(pythonw_exe):
-            pythonw_exe = python_exe
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 빌드 환경
+            cmd_target = f'cmd.exe /c "cd /d {self.project_dir} && \\"{self.script_path}\\" --sync"'
+        else:
+            python_exe = sys.executable
+            pythonw_exe = python_exe.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(pythonw_exe):
+                pythonw_exe = python_exe
+            cmd_target = f'cmd.exe /c "cd /d {self.project_dir} && \\"{pythonw_exe}\\" \\"{self.script_path}\\" --sync"'
 
-        # cmd.exe를 활용해 cd /d로 프로젝트 디렉토리에 우선 진입한 후 실행
-        cmd_target = f'cmd.exe /c "cd /d {self.project_dir} && \\"{pythonw_exe}\\" \\"{self.script_path}\\" --sync"'
         cmd = [
             "schtasks", "/create",
             "/tn", self.TASK_NAME,
@@ -62,6 +65,14 @@ class SchedulerManager:
         plist_path = os.path.join(plist_dir, f"com.x3websync.{self.TASK_NAME}.plist")
         python_exe = sys.executable
 
+        if getattr(sys, 'frozen', False):
+            args_xml = f"""        <string>{self.script_path}</string>
+        <string>--sync</string>"""
+        else:
+            args_xml = f"""        <string>{python_exe}</string>
+        <string>{self.script_path}</string>
+        <string>--sync</string>"""
+
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -70,9 +81,7 @@ class SchedulerManager:
     <string>com.x3websync.{self.TASK_NAME}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_exe}</string>
-        <string>{self.script_path}</string>
-        <string>--sync</string>
+{args_xml}
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -101,8 +110,11 @@ class SchedulerManager:
 
     def _register_linux(self, h_val: int, m_val: int) -> bool:
         """Linux crontab 기반 등록"""
-        python_exe = sys.executable
-        cron_cmd = f"{m_val} {h_val} * * * cd {self.project_dir} && {python_exe} {self.script_path} --sync >> {self.project_dir}/logs/cron.log 2>&1"
+        if getattr(sys, 'frozen', False):
+            cron_cmd = f"{m_val} {h_val} * * * cd {self.project_dir} && {self.script_path} --sync >> {self.project_dir}/logs/cron.log 2>&1"
+        else:
+            python_exe = sys.executable
+            cron_cmd = f"{m_val} {h_val} * * * cd {self.project_dir} && {python_exe} {self.script_path} --sync >> {self.project_dir}/logs/cron.log 2>&1"
         try:
             # 기존 크론탭 읽기
             result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -117,6 +129,7 @@ class SchedulerManager:
         except Exception as e:
             print(f"Linux 크론 등록 오류: {e}")
             return False
+
 
     def unregister_task(self) -> bool:
         if sys.platform == "win32":
