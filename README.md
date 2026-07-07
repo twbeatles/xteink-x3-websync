@@ -94,6 +94,12 @@ python x3_websync.py --sync
 - **X3 주소**: Wi-Fi IP 또는 `crosspoint.local`
 - **추가 기기**: GUI에서 다중 기기 등록
 - **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성)
+- **동기화 이력**: URL·기기(`device_ip`) 단위 — 부분 전송 성공 기기만 이력 기록, 실패 기기는 다음 동기화에서 재시도
+
+### 보안·프라이버시 참고
+- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수)
+- **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만 LAN 공개 사용
+- **AI 요약·번역**: 활성화 시 기사 본문이 외부 API(OpenAI 등)로 전송될 수 있음. API 키는 `config.json`에 로컬 저장
 
 ---
 
@@ -108,6 +114,7 @@ python x3_websync.py --sync
 ```bash
 python -m pytest tests/ -q
 ```
+현재 **50건** (db, pipeline, scheduler, scrapers, servers, uploader 등).
 
 ### Windows EXE 빌드 (PyInstaller)
 ```bash

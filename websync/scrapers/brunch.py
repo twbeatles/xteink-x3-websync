@@ -30,7 +30,7 @@ class BrunchScraper(BaseScraper):
                     href = ensure_article_url(href, url, title)
                     articles.append({"title": title, "content": content, "url": href})
         except Exception as e:
-            print(f"❌ BrunchScraper 오류: {e}")
+            raise Exception(f"브런치 수집 실패: {e}") from e
         return articles
 
     def _fetch_brunch_content(self, url: str, site_config: dict) -> str:

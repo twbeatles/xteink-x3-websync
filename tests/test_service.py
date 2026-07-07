@@ -81,7 +81,7 @@ def test_pipeline_no_new_articles_returns_true():
     cm.get_resolved_output_dir.return_value = "./output"
 
     svc = SyncService(cm)
-    svc.db.is_synced = MagicMock(return_value=True)
+    svc.db.needs_sync = MagicMock(return_value=False)
     with patch.object(ScraperFactory, "get_scraper") as mock_get:
         mock_get.return_value.fetch_articles.return_value = [
             {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
@@ -92,7 +92,7 @@ def test_pipeline_no_new_articles_returns_true():
     assert svc.get_last_pipeline_result()["status"] == "no_new"
 
 
-def test_pipeline_partial_upload_marks_synced():
+def test_pipeline_partial_upload_marks_only_successful_devices():
     cm = MagicMock(spec=ConfigManager)
     cfg = _base_config([
         {"name": "A", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
@@ -102,7 +102,7 @@ def test_pipeline_partial_upload_marks_synced():
     cm.get_resolved_output_dir.return_value = "./output"
 
     svc = SyncService(cm)
-    svc.db.is_synced = MagicMock(return_value=False)
+    svc.db.needs_sync = MagicMock(return_value=True)
     svc.db.mark_synced = MagicMock()
     with patch.object(svc, "_reload_config"):
         with patch.object(ScraperFactory, "get_scraper") as mock_get:
@@ -119,3 +119,21 @@ def test_pipeline_partial_upload_marks_synced():
                         result = svc.run_sync_pipeline()
     assert result is False
     svc.db.mark_synced.assert_called_once()
+    assert svc.db.mark_synced.call_args.kwargs["device_ip"] == "127.0.0.1"
+
+
+def test_pipeline_all_empty_fetch_returns_false():
+    cm = MagicMock(spec=ConfigManager)
+    cm.load_config.return_value = _base_config([
+        {"name": "A", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
+        {"name": "B", "type": "youtube", "url": "https://ex.com/videos.xml", "enabled": True, "limit": 1},
+    ])
+    cm.get_resolved_output_dir.return_value = "./output"
+
+    svc = SyncService(cm)
+    with patch.object(ScraperFactory, "get_scraper") as mock_get:
+        mock_get.return_value.fetch_articles.return_value = []
+        with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+            result = svc.run_sync_pipeline()
+    assert result is False
+    assert svc.get_last_pipeline_result()["status"] == "empty_fetch"

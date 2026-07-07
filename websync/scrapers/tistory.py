@@ -31,7 +31,7 @@ class TistoryScraper(BaseScraper):
                     post_url = ensure_article_url(post_url, url, title)
                     articles.append({"title": title, "content": content, "url": post_url})
         except Exception as e:
-            print(f"❌ TistoryScraper 오류: {e}")
+            raise Exception(f"티스토리 블로그 수집 실패: {e}") from e
         return articles
 
     def _fetch_post_content(self, url: str, site_config: dict) -> str:

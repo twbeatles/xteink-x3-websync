@@ -27,7 +27,7 @@ class YoutubeScraper(BaseScraper):
                 if content:
                     articles.append({"title": title, "content": content, "url": video_url})
         except Exception as e:
-            print(f"❌ YoutubeScraper 오류: {e}")
+            raise Exception(f"YouTube 채널 수집 실패: {e}") from e
         return articles
 
     def _fetch_transcript(self, video_id: str, title: str) -> str:

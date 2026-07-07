@@ -36,5 +36,5 @@ class SubstackScraper(BaseScraper):
                 link = ensure_article_url(link, url, title)
                 articles.append({"title": title, "content": clean_content, "url": link})
         except Exception as e:
-            print(f"❌ SubstackScraper 오류: {e}")
+            raise Exception(f"Substack 수집 실패: {e}") from e
         return articles

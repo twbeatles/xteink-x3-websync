@@ -2,35 +2,52 @@
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
-_opds_api_key: str = ""
-_require_auth: bool = False
+
+class _OPDSHTTPServer(HTTPServer):
+    """핸들러에 OPDS 설정을 주입하는 HTTP 서버"""
+
+    def __init__(
+        self,
+        server_address,
+        output_dir: str,
+        api_key: str,
+        require_auth: bool,
+    ):
+        self.output_dir = output_dir
+        self.api_key = api_key or ""
+        self.require_auth = require_auth
+        super().__init__(server_address, OPDSHandler)
 
 
 class OPDSHandler(BaseHTTPRequestHandler):
     """OPDS XML 카탈로그 및 파일 다운로드를 처리하는 HTTP 핸들러"""
-    output_dir: str = "./output"
+
+    @property
+    def _ctx(self) -> _OPDSHTTPServer:
+        return self.server  # type: ignore[return-value]
 
     def log_message(self, format, *args):
         pass
 
     def _check_auth(self) -> bool:
-        if not _require_auth:
+        ctx = self._ctx
+        if not ctx.require_auth:
             return True
-        if not _opds_api_key:
+        if not ctx.api_key:
             return False
         auth = self.headers.get("Authorization", "")
-        if auth == f"Bearer {_opds_api_key}":
+        if auth == f"Bearer {ctx.api_key}":
             return True
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
-        if qs.get("api_key", [None])[0] == _opds_api_key:
+        if qs.get("api_key", [None])[0] == ctx.api_key:
             return True
         api_header = self.headers.get("X-Api-Key", "")
-        if api_header == _opds_api_key:
+        if api_header == ctx.api_key:
             return True
         self.send_error(401, "Unauthorized")
         return False
@@ -47,16 +64,17 @@ class OPDSHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _serve_catalog(self):
+        output_dir = self._ctx.output_dir
         epub_files = []
-        if os.path.isdir(self.output_dir):
+        if os.path.isdir(output_dir):
             epub_files = sorted(
-                [f for f in os.listdir(self.output_dir) if f.lower().endswith(".epub")],
-                reverse=True
+                [f for f in os.listdir(output_dir) if f.lower().endswith(".epub")],
+                reverse=True,
             )
 
         entries = ""
         for fname in epub_files:
-            fpath = os.path.join(self.output_dir, fname)
+            fpath = os.path.join(output_dir, fname)
             size = os.path.getsize(fpath) if os.path.exists(fpath) else 0
             safe_name = fname.replace("&", "&amp;").replace("<", "&lt;")
             title = re.sub(r"_\d{4}-\d{2}-\d{2}\.epub$", "", fname.replace("_", " ")).strip()
@@ -70,11 +88,12 @@ class OPDSHandler(BaseHTTPRequestHandler):
     <link rel="http://opds-spec.org/acquisition" href="/opds/download/{fname}" type="application/epub+zip"/>
   </entry>"""
 
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
   <title>X3 WebSync OPDS 카탈로그</title>
   <id>urn:x3sync:root</id>
-  <updated>{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}</updated>
+  <updated>{now_utc}</updated>
   <link rel="self" href="/opds" type="application/atom+xml;profile=opds-catalog"/>{entries}
 </feed>"""
         body = xml.encode("utf-8")
@@ -91,7 +110,7 @@ class OPDSHandler(BaseHTTPRequestHandler):
         if not fname.lower().endswith(".epub"):
             self.send_error(403)
             return
-        fpath = os.path.join(self.output_dir, fname)
+        fpath = os.path.join(self._ctx.output_dir, fname)
         if not os.path.isfile(fpath):
             self.send_error(404)
             return
@@ -120,22 +139,23 @@ class OPDSServer:
         self.bind_host = bind_host
         self.api_key = api_key
         self.require_auth = require_auth
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[_OPDSHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
 
     def start(self) -> bool:
         if self._running:
             return True
-        global _opds_api_key, _require_auth
-        _require_auth = self.require_auth
-        _opds_api_key = self.api_key or ""
-        if _require_auth and not _opds_api_key:
+        if self.require_auth and not self.api_key:
             print("❌ OPDS: LAN 공개 모드에는 api_key가 필요합니다.")
             return False
         try:
-            OPDSHandler.output_dir = self.output_dir
-            self._server = HTTPServer((self.bind_host, self.port), OPDSHandler)
+            self._server = _OPDSHTTPServer(
+                (self.bind_host, self.port),
+                self.output_dir,
+                self.api_key,
+                self.require_auth,
+            )
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
             self._thread.start()
             self._running = True

@@ -506,8 +506,14 @@ class SyncAppGui:
         self.web_url_label.bind("<Button-1>", lambda e: self._open_url(self.web_url_label.cget("text")))
         self.web_allow_lan_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(web_frame, text="LAN 공개 (0.0.0.0)", variable=self.web_allow_lan_var, command=self._save_ui_settings).grid(row=2, column=0, columnspan=2, padx=10, pady=(0, 4), sticky="w")
+        ttk.Label(
+            web_frame,
+            text="⚠️ LAN 공개 시 HTTP 평문 전송 — 신뢰할 수 있는 네트워크에서만 사용하세요.",
+            font=("Malgun Gothic", 8),
+            foreground=self.RED_COLOR,
+        ).grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
         self.web_token_label = ttk.Label(web_frame, text="", font=("Consolas", 8), foreground=self.HINT_COLOR)
-        self.web_token_label.grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        self.web_token_label.grid(row=4, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
         self._bind_autosave(self.web_port_sp)
 
         # Calibre Watch
@@ -853,23 +859,39 @@ class SyncAppGui:
     # 연결 / 직접 전송
     # ------------------------------------------------------------------
     def _test_connection(self):
-        ip = self.ip_entry.get().strip()
         self.conn_status_label.config(text="연결 중...", foreground=self.YELLOW_COLOR)
         self.test_conn_btn.config(state="disabled")
 
         def task():
-            ok = X3Uploader(ip).test_connection()
-            self.root.after(0, lambda: self._test_connection_finished(ok))
+            uploader = self._make_uploader()
+            results = []
+            for dev in uploader._build_target_list():
+                ok = uploader.test_connection(dev["ip"])
+                results.append((dev["name"], dev["ip"], ok))
+            self.root.after(0, lambda: self._test_connection_finished(results))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _test_connection_finished(self, ok: bool):
+    def _test_connection_finished(self, results: list[tuple[str, str, bool]]):
         if not self._sync_busy:
             self.test_conn_btn.config(state="normal")
-        if ok:
-            self.conn_status_label.config(text="연결 성공 ✅", foreground=self.GREEN_COLOR)
+        if not results:
+            self.conn_status_label.config(text="등록된 기기 없음", foreground=self.RED_COLOR)
+            return
+        ok_count = sum(1 for _, _, ok in results if ok)
+        if ok_count == len(results):
+            self.conn_status_label.config(text=f"전체 {len(results)}대 연결 성공 ✅", foreground=self.GREEN_COLOR)
+        elif ok_count > 0:
+            failed = [name for name, _, ok in results if not ok]
+            self.conn_status_label.config(
+                text=f"부분 성공 ({ok_count}/{len(results)}) — 실패: {', '.join(failed)}",
+                foreground=self.YELLOW_COLOR,
+            )
         else:
-            self.conn_status_label.config(text="연결 실패 ❌", foreground=self.RED_COLOR)
+            self.conn_status_label.config(text="모든 기기 연결 실패 ❌", foreground=self.RED_COLOR)
+        for name, ip, ok in results:
+            status = "✅" if ok else "❌"
+            self._log_message(f"   {status} [{name}] {ip}")
 
     def _direct_upload(self):
         file_path = self.file_entry.get().strip()
@@ -1222,6 +1244,9 @@ class SyncAppGui:
             except ValueError:
                 messagebox.showerror("오류", "수집 개수는 숫자여야 합니다.", parent=dialog)
                 return
+            if not (1 <= limit <= 50):
+                messagebox.showerror("오류", "수집 개수는 1~50 사이여야 합니다.", parent=dialog)
+                return
             config = self.service.config
             new_site = {
                 "name": name, "type": type_cb.get(), "url": url, "limit": limit,
@@ -1255,11 +1280,19 @@ class SyncAppGui:
             self.hist_tree.delete(item)
         self._history_url_by_iid.clear()
         rows = self.service.db.get_history(limit=200)
-        for url, site_name, title, synced_at in rows:
+        for row in rows:
+            url = row[0]
+            site_name = row[1] if len(row) > 1 else ""
+            title = row[2] if len(row) > 2 else ""
+            synced_at = row[3] if len(row) > 3 else ""
+            devices = row[4] if len(row) > 4 else ""
             iid = hashlib.sha256((url or "").encode("utf-8")).hexdigest()[:24]
             self._history_url_by_iid[iid] = url
+            display_title = title or ""
+            if devices:
+                display_title = f"{display_title} [{devices}]" if display_title else f"[{devices}]"
             self.hist_tree.insert("", "end", iid=iid, values=(
-                site_name or "", title or "", synced_at or "", url or ""
+                site_name or "", display_title, synced_at or "", url or ""
             ))
         count = self.service.db.get_count()
         self.history_count_label.config(text=f"총 {count}건 기록됨")
@@ -1350,7 +1383,16 @@ class SyncAppGui:
                 get_log_callback=self._get_log_for_web,
                 pipeline_busy_callback=self.service.is_pipeline_running,
                 get_status_callback=self.service.get_last_pipeline_result,
+                allow_lan=self.web_allow_lan_var.get(),
             )
+            if self.web_allow_lan_var.get():
+                if not messagebox.askyesno(
+                    "LAN 공개 경고",
+                    "LAN 공개 모드는 HTTP 평문으로 API 토큰이 전송됩니다.\n"
+                    "신뢰할 수 있는 네트워크에서만 계속하시겠습니까?",
+                    icon="warning",
+                ):
+                    return
             if self._web_dashboard.start():
                 self.web_start_btn.config(text="■ 서버 중지")
                 self.web_status_label.config(text="실행 중 ✅", foreground=self.GREEN_COLOR)

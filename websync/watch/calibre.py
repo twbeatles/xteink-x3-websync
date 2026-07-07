@@ -5,6 +5,8 @@ import threading
 from typing import Callable, Optional
 
 DEBOUNCE_SECONDS = 2.0
+STABLE_SIZE_CHECKS = 2
+STABLE_CHECK_INTERVAL = 0.5
 
 
 class CalibreWatcher:
@@ -29,15 +31,38 @@ class CalibreWatcher:
             self._debounce_timer.daemon = True
             self._debounce_timer.start()
 
+    @staticmethod
+    def _is_file_stable(path: str) -> bool:
+        """파일 크기가 연속으로 동일할 때만 전송 대상으로 간주합니다."""
+        if not os.path.isfile(path):
+            return False
+        try:
+            last_size = os.path.getsize(path)
+        except OSError:
+            return False
+        for _ in range(STABLE_SIZE_CHECKS):
+            time.sleep(STABLE_CHECK_INTERVAL)
+            if not os.path.isfile(path):
+                return False
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                return False
+            if size != last_size:
+                return False
+            last_size = size
+        return True
+
     def _flush_pending(self):
         with self._pending_lock:
             now = time.time()
-            ready = [
+            candidates = [
                 path for path, ts in self._pending.items()
-                if now - ts >= self.debounce_sec and os.path.isfile(path)
+                if now - ts >= self.debounce_sec
             ]
-            for path in ready:
+            for path in candidates:
                 del self._pending[path]
+        ready = [path for path in candidates if self._is_file_stable(path)]
         for path in ready:
             try:
                 self.on_new_file(path)

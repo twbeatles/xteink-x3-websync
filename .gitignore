@@ -29,3 +29,9 @@ dist/
 # OS Files
 .DS_Store
 Thumbs.db
+
+
+#mcps
+terminals/
+mcps/
+.codegraph/

@@ -8,11 +8,6 @@ import http.cookies
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Callable
 
-_sync_callback: Optional[Callable] = None
-_get_log_callback: Optional[Callable] = None
-_get_status_callback: Optional[Callable[[], dict]] = None
-_api_token: str = ""
-_pipeline_busy_callback: Optional[Callable[[], bool]] = None
 _session_cookie_name = "x3sync_session"
 
 
@@ -133,7 +128,37 @@ setInterval(refreshStatus, 5000);
 </html>"""
 
 
+class _DashboardHTTPServer(HTTPServer):
+    """핸들러에 대시보드 설정·콜백을 주입하는 HTTP 서버"""
+
+    def __init__(
+        self,
+        server_address,
+        api_token: str,
+        sync_callback: Optional[Callable],
+        get_log_callback: Optional[Callable],
+        pipeline_busy_callback: Optional[Callable[[], bool]],
+        get_status_callback: Optional[Callable[[], dict]],
+        allow_lan: bool = False,
+    ):
+        self.api_token = api_token or ""
+        self.sync_callback = sync_callback
+        self.get_log_callback = get_log_callback
+        self.pipeline_busy_callback = pipeline_busy_callback
+        self.get_status_callback = get_status_callback
+        self.allow_lan = allow_lan
+        super().__init__(server_address, DashboardHandler)
+
+    @property
+    def ctx(self) -> "_DashboardHTTPServer":
+        return self
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
+    @property
+    def _ctx(self) -> _DashboardHTTPServer:
+        return self.server  # type: ignore[return-value]
+
     def log_message(self, format, *args):
         pass
 
@@ -148,13 +173,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return None
 
     def _is_authenticated(self) -> bool:
-        if not _api_token:
+        token = self._ctx.api_token
+        if not token:
             return False
         auth = self.headers.get("Authorization", "")
-        if auth == f"Bearer {_api_token}":
+        if auth == f"Bearer {token}":
             return True
         session = self._get_cookie(_session_cookie_name)
-        return session == _session_value(_api_token)
+        return session == _session_value(token)
 
     def _require_auth(self) -> bool:
         if self._is_authenticated():
@@ -189,8 +215,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             log_text = ""
-            if _get_log_callback:
-                log_text = _get_log_callback() or ""
+            if self._ctx.get_log_callback:
+                log_text = self._ctx.get_log_callback() or ""
             else:
                 from websync.core.paths import PROJECT_ROOT
                 log_dir = os.path.join(PROJECT_ROOT, "logs")
@@ -208,38 +234,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             status = {"running": False, "last_result": {}}
-            if _pipeline_busy_callback:
-                status["running"] = _pipeline_busy_callback()
-            if _get_status_callback:
-                status["last_result"] = _get_status_callback()
+            if self._ctx.pipeline_busy_callback:
+                status["running"] = self._ctx.pipeline_busy_callback()
+            if self._ctx.get_status_callback:
+                status["last_result"] = self._ctx.get_status_callback()
             self._send_json(200, status)
         else:
             self.send_error(404)
 
     def do_POST(self):
         if self.path == "/api/login":
-            if not _api_token:
+            token = self._ctx.api_token
+            if not token:
                 self._send_json(503, {"error": "API 토큰이 설정되지 않았습니다."})
                 return
             auth = self.headers.get("Authorization", "")
-            token_ok = auth == f"Bearer {_api_token}"
+            token_ok = auth == f"Bearer {token}"
             if not token_ok:
                 try:
                     length = int(self.headers.get("Content-Length", 0))
                     body = self.rfile.read(length).decode("utf-8") if length else "{}"
                     data = json.loads(body or "{}")
-                    token_ok = data.get("token") == _api_token
+                    token_ok = data.get("token") == token
                 except Exception:
                     token_ok = False
             if not token_ok:
                 self._send_json(401, {"error": "잘못된 API 토큰입니다."})
                 return
-            session_val = _session_value(_api_token)
+            session_val = _session_value(token)
+            cookie_flags = "Path=/; HttpOnly; SameSite=Strict"
+            if self._ctx.allow_lan:
+                cookie_flags += "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header(
                 "Set-Cookie",
-                f"{_session_cookie_name}={session_val}; Path=/; HttpOnly; SameSite=Strict",
+                f"{_session_cookie_name}={session_val}; {cookie_flags}",
             )
             self.send_header("Content-Length", "18")
             self.end_headers()
@@ -247,12 +277,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/sync":
             if not self._require_auth():
                 return
-            if _pipeline_busy_callback and _pipeline_busy_callback():
+            busy_cb = self._ctx.pipeline_busy_callback
+            if busy_cb and busy_cb():
                 self._send_json(200, {"message": "⚠️ 동기화가 이미 실행 중입니다."})
                 return
             msg = "동기화가 백그라운드에서 시작됩니다."
-            if _sync_callback:
-                threading.Thread(target=_sync_callback, daemon=True).start()
+            sync_cb = self._ctx.sync_callback
+            if sync_cb:
+                threading.Thread(target=sync_cb, daemon=True).start()
             self._send_json(200, {"message": f"✅ {msg}"})
         else:
             self.send_error(404)
@@ -270,26 +302,35 @@ class WebDashboard:
         get_log_callback: Optional[Callable] = None,
         pipeline_busy_callback: Optional[Callable[[], bool]] = None,
         get_status_callback: Optional[Callable[[], dict]] = None,
+        allow_lan: bool = False,
     ):
-        global _sync_callback, _get_log_callback, _api_token, _pipeline_busy_callback, _get_status_callback
         self.port = port
         self.bind_host = bind_host
-        _sync_callback = sync_callback
-        _get_log_callback = get_log_callback
-        _api_token = api_token or ""
-        _pipeline_busy_callback = pipeline_busy_callback
-        _get_status_callback = get_status_callback
-        self._server: Optional[HTTPServer] = None
+        self.api_token = api_token or ""
+        self.sync_callback = sync_callback
+        self.get_log_callback = get_log_callback
+        self.pipeline_busy_callback = pipeline_busy_callback
+        self.get_status_callback = get_status_callback
+        self.allow_lan = allow_lan
+        self._server: Optional[_DashboardHTTPServer] = None
         self._running = False
 
     def start(self) -> bool:
         if self._running:
             return True
-        if not _api_token:
+        if not self.api_token:
             print("❌ 웹 대시보드: API 토큰이 없습니다. config.json을 확인하세요.")
             return False
         try:
-            self._server = HTTPServer((self.bind_host, self.port), DashboardHandler)
+            self._server = _DashboardHTTPServer(
+                (self.bind_host, self.port),
+                self.api_token,
+                self.sync_callback,
+                self.get_log_callback,
+                self.pipeline_busy_callback,
+                self.get_status_callback,
+                self.allow_lan,
+            )
             t = threading.Thread(target=self._server.serve_forever, daemon=True)
             t.start()
             self._running = True

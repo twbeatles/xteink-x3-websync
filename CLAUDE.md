@@ -243,9 +243,10 @@ run_sync_pipeline()
 
 | 항목 | 내용 |
 |------|------|
-| 역할 | 전송 완료된 포스트 URL 영구 이력 관리 |
+| 역할 | 기기별(`device_ip`) 전송 완료 포스트 URL 이력 관리 |
 | 동시성 | `threading.Lock()` + `sqlite3.connect(timeout=10.0)` |
-| 테이블 | `synced_posts(url PK, site_name, title, synced_at)` |
+| 테이블 | `synced_posts(url, device_ip PK, site_name, title, synced_at)` — 레거시 DB는 `device_ip='*'`로 자동 마이그레이션 |
+| API | `needs_sync(url, target_ips)`, `mark_synced(..., device_ip)`, `is_synced_for_device()` |
 
 ---
 
@@ -254,7 +255,7 @@ run_sync_pipeline()
 | 항목 | 내용 |
 |------|------|
 | 프레임워크 | `tkinter` + `ttk` |
-| 테마 | Catppuccin Mocha 다크 팔레트 (`#1e1e2e` 계열) |
+| 테마 | Clean Light Theme (`#f8f9fa` 배경, Bootstrap 스타일 포인트 컬러) |
 | 탭 구조 | `뉴스 동기화 및 일반설정` / `Calibre 서재 연동` |
 | 비동기 | `threading.Thread(daemon=True)` + `root.after(0, callback)` 패턴 |
 
@@ -376,8 +377,8 @@ run_sync_pipeline()
 - **수정 모듈**: `config_manager.py` (스키마: `"x3_devices": [...]`), `uploader.py`, `gui.py`
 
 #### O. 크로스플랫폼 알림 및 스케줄러 (macOS/Linux)
-- **설명**: 현재 `notifier.py`와 `scheduler.py`는 Windows 전용. `plyer` 라이브러리로 알림 추상화, macOS `launchd` / Linux `cron` 지원
-- **수정 모듈**: `notifier.py`, `scheduler.py`
+- **설명**: ~~Windows 전용~~ → **구현 완료**: `notifier.py`는 Windows/macOS/Linux, `scheduler.py`는 schtasks/launchd/crontab 지원
+- **수정 모듈**: `notifier.py`, `scheduler.py` (유지보수만)
 
 #### P. Calibre 서재 자동 Watch 동기화
 - **설명**: Calibre 서재 폴더를 `watchdog` 라이브러리로 감시. 새 책 추가 시 자동으로 X3 기기에 전송
@@ -448,9 +449,9 @@ DEFAULT_CONFIG = {
 | `tkinter` | GUI (Python 표준 내장) | 필수 |
 | `sqlite3` | 동기화 이력 DB (Python 표준 내장) | 필수 |
 | `Calibre` | 도서 서재 연동 (외부 설치) | 선택 |
-| `Pillow` | 표지 이미지 생성 (예정) | 선택 (미구현) |
-| `youtube-transcript-api` | YouTube 자막 수집 (예정) | 선택 (미구현) |
-| `watchdog` | 파일 시스템 변경 감시 (예정) | 선택 (미구현) |
+| `Pillow` | 표지 이미지 생성 | 선택 (`requirements-optional.txt`) |
+| `youtube-transcript-api` | YouTube 자막 수집 | 선택 (`requirements-optional.txt`) |
+| `watchdog` | Calibre 폴더 감시 | 선택 (`requirements-optional.txt`) |
 
 ---
 

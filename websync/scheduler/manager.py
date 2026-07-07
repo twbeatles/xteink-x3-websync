@@ -1,5 +1,6 @@
 import os
 import sys
+import shlex
 import subprocess
 
 class SchedulerManager:
@@ -101,7 +102,8 @@ class SchedulerManager:
         try:
             with open(plist_path, "w", encoding="utf-8") as f:
                 f.write(plist_content)
-            # launchctl 로드
+            if os.path.exists(plist_path):
+                subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
             result = subprocess.run(["launchctl", "load", plist_path], capture_output=True)
             return result.returncode == 0
         except Exception as e:
@@ -110,11 +112,16 @@ class SchedulerManager:
 
     def _register_linux(self, h_val: int, m_val: int) -> bool:
         """Linux crontab 기반 등록"""
+        project_q = shlex.quote(self.project_dir)
+        log_path = shlex.quote(os.path.join(self.project_dir, "logs", "cron.log"))
         if getattr(sys, 'frozen', False):
-            cron_cmd = f"{m_val} {h_val} * * * cd {self.project_dir} && {self.script_path} --sync >> {self.project_dir}/logs/cron.log 2>&1"
+            script_q = shlex.quote(self.script_path)
+            run_part = f"cd {project_q} && {script_q} --sync"
         else:
-            python_exe = sys.executable
-            cron_cmd = f"{m_val} {h_val} * * * cd {self.project_dir} && {python_exe} {self.script_path} --sync >> {self.project_dir}/logs/cron.log 2>&1"
+            python_q = shlex.quote(sys.executable)
+            script_q = shlex.quote(self.script_path)
+            run_part = f"cd {project_q} && {python_q} {script_q} --sync"
+        cron_cmd = f"{m_val} {h_val} * * * {run_part} >> {log_path} 2>&1"
         try:
             # 기존 크론탭 읽기
             result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)

@@ -111,7 +111,11 @@ class SyncService:
         partial_count = 0
         actual_work_sites = 0
         site_errors = 0
+        empty_fetch_sites = 0
         generate_cover = self.config.get("epub_cover", True)
+        upload_targets = self.uploader._build_target_list()
+        target_ips = [d["ip"] for d in upload_targets]
+        name_to_ip = {d["name"]: d["ip"] for d in upload_targets}
 
         for site_idx, site in enumerate(enabled_sites):
             name = site.get("name", "무명 사이트")
@@ -128,6 +132,7 @@ class SyncService:
                 articles = scraper.fetch_articles(site)
 
                 if not articles:
+                    empty_fetch_sites += 1
                     log(f"⚠️ [{name}] 수집된 기사가 없어 건너뜁니다. (URL·스크래퍼 설정·네트워크를 확인하세요)")
                     continue
 
@@ -139,7 +144,7 @@ class SyncService:
                     url = art.get("url")
                     if not url:
                         continue
-                    if not self.db.is_synced(url):
+                    if self.db.needs_sync(url, target_ips):
                         new_articles.append(art)
 
                 skipped = len(articles) - len(new_articles)
@@ -176,14 +181,23 @@ class SyncService:
                 all_ok = bool(upload_results) and all(upload_results.values())
 
                 if any_ok:
-                    for art in new_articles:
-                        self.db.mark_synced(art["url"], name, art.get("title"))
+                    for dev_name, ok in upload_results.items():
+                        if not ok:
+                            continue
+                        device_ip = name_to_ip.get(dev_name, dev_name)
+                        for art in new_articles:
+                            self.db.mark_synced(
+                                art["url"], name, art.get("title", ""), device_ip=device_ip
+                            )
                     if all_ok:
                         log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
                         success_count += 1
                     else:
                         failed = [n for n, ok in upload_results.items() if not ok]
-                        log(f"⚠️ [{name}] 일부 기기 전송 실패: {', '.join(failed)} (이력 기록됨, 실패 기기만 재시도 필요)")
+                        log(
+                            f"⚠️ [{name}] 일부 기기 전송 실패: {', '.join(failed)} "
+                            f"(성공 기기만 이력 기록, 실패 기기는 다음 동기화에서 재시도)"
+                        )
                         partial_count += 1
                 else:
                     log(f"❌ [{name}] 전송 실패! 기기가 켜져 있고 Wi-Fi 상태인지 확인하세요.")
@@ -211,6 +225,22 @@ class SyncService:
                     is_error=True,
                 )
                 self._last_pipeline_result = {"status": "errors", "success": False, "site_errors": site_errors}
+                return False
+            if empty_fetch_sites == total_sites:
+                log(
+                    f"\n📊 작업 결과 요약: 활성 사이트 {total_sites}개 모두 수집 결과가 비었습니다. "
+                    "스크래퍼 설정·네트워크·의존성 패키지를 확인하세요."
+                )
+                ToastNotifier.show_toast(
+                    "X3 WebSync 동기화 실패",
+                    "모든 사이트에서 기사를 수집하지 못했습니다. 로그를 확인하세요.",
+                    is_error=True,
+                )
+                self._last_pipeline_result = {
+                    "status": "empty_fetch",
+                    "success": False,
+                    "empty_fetch_sites": empty_fetch_sites,
+                }
                 return False
             log("\n📊 작업 결과 요약: 모든 등록 사이트에 전송할 신규 포스트가 없습니다. (기기 전송 생략)")
             ToastNotifier.show_toast(
