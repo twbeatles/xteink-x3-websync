@@ -5,7 +5,7 @@ import shutil
 import threading
 import copy
 from websync.core.paths import PROJECT_ROOT, resolve_path
-from websync.config.exceptions import ConfigLoadError
+from websync.config.exceptions import ConfigLoadError, ConfigSaveError
 
 class ConfigManager:
     """설정 파일(config.json)의 로드 및 저장을 전담하는 클래스"""
@@ -23,6 +23,7 @@ class ConfigManager:
         "enabled": True,
         "include_images": False,
         "translate_to": "",
+        "fetch_detail_page": False,
     }
 
     CONFIG_VERSION = 2
@@ -205,12 +206,15 @@ class ConfigManager:
             self._save_config_unlocked(config_data)
 
     def _save_config_unlocked(self, config_data: dict):
-        """락이 이미 잡힌 상태에서 호출하는 내부 저장 전용 함수 (원자적 쓰기)"""
+        """락이 이미 잡힌 상태에서 호출하는 내부 저장 전용 함수 (원자적 쓰기).
+
+        실패 시 ConfigSaveError를 발생시킵니다.
+        """
+        tmp_path = f"{self.config_path}.tmp"
         try:
             config_data.setdefault("config_version", self.CONFIG_VERSION)
             directory = os.path.dirname(self.config_path) or "."
             os.makedirs(directory, exist_ok=True)
-            tmp_path = f"{self.config_path}.tmp"
             bak_path = f"{self.config_path}.bak"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=4)
@@ -222,13 +226,15 @@ class ConfigManager:
                 except OSError:
                     pass
             os.replace(tmp_path, self.config_path)
+        except ConfigSaveError:
+            raise
         except Exception as e:
-            print(f"❌ 설정 저장 실패: {e}")
-            if os.path.exists(f"{self.config_path}.tmp"):
+            if os.path.exists(tmp_path):
                 try:
-                    os.remove(f"{self.config_path}.tmp")
+                    os.remove(tmp_path)
                 except OSError:
                     pass
+            raise ConfigSaveError(f"config.json 저장 실패: {e}") from e
 
     def get_resolved_output_dir(self, config: dict | None = None) -> str:
         cfg = config or self.load_config()

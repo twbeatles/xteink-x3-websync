@@ -4,8 +4,10 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
+
 class X3Uploader:
     """Xteink X3 기기와의 HTTP 업로드 통신을 전담하는 클래스 (단일/다중 기기 지원)"""
+
     def __init__(self, x3_ip: str, devices: Optional[list] = None):
         self.x3_ip = x3_ip
         self.devices = devices or []
@@ -13,10 +15,10 @@ class X3Uploader:
     def _sanitize_filename(self, file_path: str) -> str:
         """CrossPoint 오작동(공백/특수문자/한글 파일명 크래시) 우회용 파일명 클렌징"""
         base, ext = os.path.splitext(os.path.basename(file_path))
-        safe_base = "".join([c if c.isalnum() or c in ('-', '_') else '_' for c in base])
-        while '__' in safe_base:
-            safe_base = safe_base.replace('__', '_')
-        safe_base = safe_base.strip('_')
+        safe_base = "".join([c if c.isalnum() or c in ("-", "_") else "_" for c in base])
+        while "__" in safe_base:
+            safe_base = safe_base.replace("__", "_")
+        safe_base = safe_base.strip("_")
         if not safe_base:
             safe_base = "sync_book"
         return safe_base + ext.lower()
@@ -55,14 +57,16 @@ class X3Uploader:
         seen_ips: set[str] = set()
 
         if self.x3_ip:
-            targets.append({"name": "기본 기기", "ip": self.x3_ip})
-            seen_ips.add(self.x3_ip)
+            ip = str(self.x3_ip).strip()
+            if ip:
+                targets.append({"name": "기본 기기", "ip": ip})
+                seen_ips.add(ip)
 
         for dev in self.devices:
             ip = (dev.get("ip") or "").strip()
             if not ip or ip in seen_ips:
                 continue
-            targets.append({"name": dev.get("name", ip), "ip": ip})
+            targets.append({"name": dev.get("name") or ip, "ip": ip})
             seen_ips.add(ip)
 
         return targets
@@ -79,19 +83,32 @@ class X3Uploader:
         return result
 
     def upload_to_all_devices(self, file_path: str) -> dict:
-        """등록된 모든 기기에 병렬로 파일 전송. 결과를 {기기명: bool} 딕셔너리로 반환."""
+        """등록된 모든 기기에 병렬로 파일 전송. 결과를 {ip: bool} 로 반환."""
         return self.upload_to_targets(file_path)
 
-    def upload_to_targets(self, file_path: str) -> dict:
-        """기본 기기 및 x3_devices 전체에 단일 경로로 전송합니다."""
+    def upload_to_targets(
+        self,
+        file_path: str,
+        only_ips: Optional[list[str]] = None,
+    ) -> dict[str, bool]:
+        """
+        기본 기기 및 x3_devices에 전송합니다.
+        반환: {ip: 성공여부} — 키는 항상 기기 IP/호스트입니다.
+
+        only_ips: 지정 시 해당 IP만 전송 (부분 재시도용).
+        """
         all_devices = self._build_target_list()
+        if only_ips is not None:
+            allow = {ip.strip() for ip in only_ips if ip and str(ip).strip()}
+            all_devices = [d for d in all_devices if d["ip"] in allow]
+
         if not all_devices:
-            print("⚠️ 등록된 기기가 없습니다.")
+            print("⚠️ 등록된 기기가 없습니다." if only_ips is None else "⚠️ 전송 대상 기기가 없습니다.")
             return {}
 
         safe_filename = self._sanitize_filename(file_path)
         timeout = self._calc_timeout(file_path)
-        results = {}
+        results: dict[str, bool] = {}
 
         with ThreadPoolExecutor(max_workers=min(len(all_devices), 4)) as executor:
             future_to_device = {
@@ -100,12 +117,12 @@ class X3Uploader:
             }
             for future in as_completed(future_to_device):
                 device = future_to_device[future]
-                name = device.get("name", device["ip"])
+                ip = device["ip"]
                 try:
-                    results[name] = future.result()
+                    results[ip] = future.result()
                 except Exception as e:
-                    print(f"❌ [{name}] 전송 예외: {e}")
-                    results[name] = False
+                    print(f"❌ [{device.get('name', ip)}] 전송 예외: {e}")
+                    results[ip] = False
         return results
 
     def test_connection(self, ip: str = None) -> bool:

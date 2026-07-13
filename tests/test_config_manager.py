@@ -4,7 +4,9 @@ import tempfile
 
 import pytest
 
-from websync.config.exceptions import ConfigLoadError
+from unittest.mock import patch
+
+from websync.config.exceptions import ConfigLoadError, ConfigSaveError
 from websync.config.manager import ConfigManager
 
 
@@ -46,3 +48,13 @@ def test_corrupt_json_raises_and_preserves():
         with pytest.raises(ConfigLoadError) as exc:
             cm.load_config()
         assert exc.value.corrupt_path and os.path.exists(exc.value.corrupt_path)
+
+
+def test_save_config_raises_on_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        cm = ConfigManager(path)
+        cfg = cm.load_config()
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            with pytest.raises(ConfigSaveError):
+                cm.save_config(cfg)

@@ -75,6 +75,22 @@ def test_legacy_migration():
             pass
 
 
+def test_delete_entry_raises_on_error():
+    db, path = _make_db()
+    try:
+        db.mark_synced("https://x.com/1", "s", "t", device_ip="1.1.1.1")
+        # 잘못된 경로로 연결 유도: db_path 변경 후 delete
+        db.db_path = os.path.join(tempfile.gettempdir(), "nonexistent_dir_xyz", "no.db")
+        with pytest.raises(SyncHistoryDbError):
+            db.delete_entry("https://x.com/1")
+    finally:
+        # path 원본 정리는 실패할 수 있음
+        try:
+            _cleanup_db(db, path)
+        except Exception:
+            pass
+
+
 def test_concurrent_access():
     db, path = _make_db()
     try:

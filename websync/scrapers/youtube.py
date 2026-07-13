@@ -5,11 +5,17 @@ from bs4 import BeautifulSoup
 
 class YoutubeScraper(BaseScraper):
     """YouTube 채널 최신 영상의 자막을 수집하여 EPUB으로 변환하는 스크래퍼"""
+
+    def __init__(self):
+        self.last_fetch_stats: dict = {}
+
     def fetch_articles(self, site_config: dict) -> list:
         # url은 채널 RSS 피드: https://www.youtube.com/feeds/videos.xml?channel_id=...
+        self.last_fetch_stats = {"skipped": 0}
         url = site_config.get("url", "")
         limit = site_config.get("limit", 3)
         articles = []
+        skipped = 0
         try:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
@@ -19,6 +25,7 @@ class YoutubeScraper(BaseScraper):
                 title_tag = entry.find("title")
                 video_id_tag = entry.find("yt:videoId")
                 if not title_tag or not video_id_tag:
+                    skipped += 1
                     continue
                 title = title_tag.get_text(strip=True)
                 video_id = video_id_tag.get_text(strip=True)
@@ -26,7 +33,17 @@ class YoutubeScraper(BaseScraper):
                 content = self._fetch_transcript(video_id, title)
                 if content:
                     articles.append({"title": title, "content": content, "url": video_url})
+                else:
+                    skipped += 1
+            self.last_fetch_stats = {"skipped": skipped}
+            if entries and not articles:
+                raise Exception(
+                    f"영상 {len(entries)}건 중 자막 수집 성공 0건 "
+                    "(youtube-transcript-api 설치·자막 가용 여부를 확인하세요)"
+                )
         except Exception as e:
+            if "자막 수집 성공 0건" in str(e) or "YouTube 채널 수집 실패" in str(e):
+                raise
             raise Exception(f"YouTube 채널 수집 실패: {e}") from e
         return articles
 

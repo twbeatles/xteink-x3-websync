@@ -103,6 +103,7 @@ def test_pipeline_partial_upload_marks_only_successful_devices():
 
     svc = SyncService(cm)
     svc.db.needs_sync = MagicMock(return_value=True)
+    svc.db.is_synced_for_device = MagicMock(return_value=False)
     svc.db.mark_synced = MagicMock()
     with patch.object(svc, "_reload_config"):
         with patch.object(ScraperFactory, "get_scraper") as mock_get:
@@ -113,13 +114,51 @@ def test_pipeline_partial_upload_marks_only_successful_devices():
                 with patch.object(
                     svc.uploader,
                     "upload_to_targets",
-                    return_value={"기본 기기": True, "추가": False},
-                ):
+                    return_value={"127.0.0.1": True, "10.0.0.2": False},
+                ) as mock_upload:
                     with patch("websync.pipeline.service.ToastNotifier.show_toast"):
                         result = svc.run_sync_pipeline()
     assert result is False
     svc.db.mark_synced.assert_called_once()
     assert svc.db.mark_synced.call_args.kwargs["device_ip"] == "127.0.0.1"
+    # only_ips 에 미전송 기기 전달
+    assert mock_upload.call_args.kwargs.get("only_ips") == ["127.0.0.1", "10.0.0.2"]
+
+
+def test_pipeline_skips_already_synced_device_on_retry():
+    cm = MagicMock(spec=ConfigManager)
+    cfg = _base_config([
+        {"name": "A", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
+    ])
+    cfg["x3_ip"] = "10.0.0.1"
+    cfg["x3_devices"] = [{"name": "B", "ip": "10.0.0.2"}]
+    cm.load_config.return_value = cfg
+    cm.get_resolved_output_dir.return_value = "./output"
+
+    svc = SyncService(cm)
+    svc.db.needs_sync = MagicMock(return_value=True)
+
+    def synced_side(url, ip):
+        return ip == "10.0.0.1"
+
+    svc.db.is_synced_for_device = MagicMock(side_effect=synced_side)
+    svc.db.mark_synced = MagicMock()
+    with patch.object(svc, "_reload_config"):
+        with patch.object(ScraperFactory, "get_scraper") as mock_get:
+            mock_get.return_value.fetch_articles.return_value = [
+                {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
+            ]
+            with patch.object(svc.epub_builder, "build", return_value="/tmp/test.epub"):
+                with patch.object(
+                    svc.uploader,
+                    "upload_to_targets",
+                    return_value={"10.0.0.2": True},
+                ) as mock_upload:
+                    with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+                        result = svc.run_sync_pipeline()
+    assert result is True
+    assert mock_upload.call_args.kwargs.get("only_ips") == ["10.0.0.2"]
+    assert svc.db.mark_synced.call_args.kwargs["device_ip"] == "10.0.0.2"
 
 
 def test_pipeline_all_empty_fetch_returns_false():

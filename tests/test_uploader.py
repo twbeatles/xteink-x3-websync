@@ -39,7 +39,7 @@ def test_upload_to_targets_all_success():
     try:
         with patch.object(u, "_upload_to_ip", return_value=True) as mock_up:
             results = u.upload_to_targets(path)
-        assert results == {"기본 기기": True, "B": True}
+        assert results == {"10.0.0.1": True, "10.0.0.2": True}
         assert mock_up.call_count == 2
     finally:
         os.remove(path)
@@ -56,8 +56,23 @@ def test_upload_to_targets_partial_failure():
 
         with patch.object(u, "_upload_to_ip", side_effect=side_effect):
             results = u.upload_to_targets(path)
-        assert results["기본 기기"] is True
-        assert results["B"] is False
+        assert results["10.0.0.1"] is True
+        assert results["10.0.0.2"] is False
+    finally:
+        os.remove(path)
+
+
+def test_upload_to_targets_only_ips_filter():
+    u = X3Uploader("10.0.0.1", devices=[{"name": "B", "ip": "10.0.0.2"}])
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as f:
+        f.write(b"data")
+        path = f.name
+    try:
+        with patch.object(u, "_upload_to_ip", return_value=True) as mock_up:
+            results = u.upload_to_targets(path, only_ips=["10.0.0.2"])
+        assert results == {"10.0.0.2": True}
+        assert mock_up.call_count == 1
+        assert mock_up.call_args.args[1] == "10.0.0.2"
     finally:
         os.remove(path)
 

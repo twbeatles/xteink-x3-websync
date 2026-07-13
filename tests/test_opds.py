@@ -82,3 +82,24 @@ def test_opds_path_traversal_blocked():
             assert exc.value.code in (403, 404)
         finally:
             srv.stop()
+
+
+def test_opds_unicode_filename_download():
+    from urllib.parse import quote
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fname = "한글_책_2026-01-01.epub"
+        with open(os.path.join(tmp, fname), "wb") as f:
+            f.write(b"epub-data")
+        srv = _start_server(tmp, require_auth=False)
+        try:
+            catalog_url = f"http://127.0.0.1:{srv.port}/opds"
+            with urllib.request.urlopen(catalog_url, timeout=3) as resp:
+                body = resp.read().decode("utf-8")
+            assert quote(fname, safe="") in body or fname in body
+
+            dl = f"http://127.0.0.1:{srv.port}/opds/download/{quote(fname, safe='')}"
+            with urllib.request.urlopen(dl, timeout=3) as resp:
+                assert resp.read() == b"epub-data"
+        finally:
+            srv.stop()

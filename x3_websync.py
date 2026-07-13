@@ -33,7 +33,9 @@ from websync.core.logger import get_logger
 
 
 lock_file = None
+_win_mutex = None
 LOCK_FILENAME = "x3_websync_instance.lock"
+WIN_MUTEX_NAME = "Local\\XteinkX3WebSync_GUI_SingleInstance"
 
 
 def _lock_path() -> str:
@@ -83,12 +85,51 @@ def _remove_stale_lock(lock_path: str) -> bool:
     return False
 
 
+def _acquire_windows_mutex() -> bool:
+    """Windows named mutex로 GUI 단일 인스턴스를 보장합니다."""
+    global _win_mutex
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.GetLastError.restype = wintypes.DWORD
+
+    handle = kernel32.CreateMutexW(None, False, WIN_MUTEX_NAME)
+    if not handle:
+        return False
+    ERROR_ALREADY_EXISTS = 183
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return False
+    _win_mutex = handle
+    return True
+
+
+def _release_windows_mutex():
+    global _win_mutex
+    if _win_mutex is None:
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.ReleaseMutex(_win_mutex)
+        ctypes.windll.kernel32.CloseHandle(_win_mutex)
+    except Exception:
+        pass
+    _win_mutex = None
+
+
 def acquire_instance_lock() -> bool:
-    """단일 인스턴스 기동 검사 (stale 락 파일 복구 포함)"""
+    """단일 인스턴스 기동 검사 (stale 락 파일 복구 포함, Windows는 named mutex 병행)"""
     global lock_file
+
+    if sys.platform == "win32":
+        if not _acquire_windows_mutex():
+            return False
+
     lock_path = _lock_path()
     _remove_stale_lock(lock_path)
-
     payload = f"{os.getpid()},{datetime.now().isoformat()}"
 
     try:
@@ -104,7 +145,22 @@ def acquire_instance_lock() -> bool:
         return True
     except (OSError, FileExistsError):
         if _remove_stale_lock(lock_path):
-            return acquire_instance_lock()
+            # mutex는 이미 잡힌 상태이므로 파일만 재시도
+            try:
+                if sys.platform == "win32":
+                    lock_file = os.open(lock_path, os.O_CREAT | os.O_WRONLY | os.O_EXCL)
+                    os.write(lock_file, payload.encode("utf-8"))
+                else:
+                    lock_file = open(lock_path, "x", encoding="utf-8")
+                    lock_file.write(payload)
+                    lock_file.flush()
+                    import fcntl
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except (OSError, FileExistsError):
+                pass
+        if sys.platform == "win32":
+            _release_windows_mutex()
         return False
 
 
@@ -126,6 +182,8 @@ def release_instance_lock():
             os.remove(lock_path)
     except Exception:
         pass
+    if sys.platform == "win32":
+        _release_windows_mutex()
 
 
 def main():
@@ -137,7 +195,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # GUI만 단일 인스턴스 락 — --sync는 파이프라인 락(SyncService)만 사용해 GUI 실행 중에도 동작
+    # GUI만 단일 인스턴스 락 — --sync는 프로세스 파일 락(SyncService)으로 직렬화
     gui_lock_acquired = False
     if not args.sync:
         if not acquire_instance_lock():

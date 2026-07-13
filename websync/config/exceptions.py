@@ -7,3 +7,7 @@ class ConfigLoadError(Exception):
     def __init__(self, message: str, corrupt_path: str | None = None):
         super().__init__(message)
         self.corrupt_path = corrupt_path
+
+
+class ConfigSaveError(Exception):
+    """config.json 저장 실패"""

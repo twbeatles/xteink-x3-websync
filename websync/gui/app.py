@@ -15,6 +15,8 @@ from websync.servers.opds import OPDSServer
 from websync.watch.calibre import CalibreWatcher
 from websync.servers.web_dashboard import WebDashboard
 from websync.core.logger import get_log_dir
+from websync.config.exceptions import ConfigSaveError
+from websync.db.history import SyncHistoryDbError
 
 class SyncAppGui:
     """Tkinter를 기반으로 탭형 인터페이스를 제공하고 비즈니스 흐름을 연동하는 클래스"""
@@ -644,19 +646,40 @@ class SyncAppGui:
             config.get("x3_devices", []),
         )
 
-    @staticmethod
-    def _summarize_upload_results(results: dict) -> tuple[bool, bool, str]:
-        """(전체 성공, 일부 성공, 로그용 요약 문자열) 반환"""
+    def _ip_display_name(self, ip: str) -> str:
+        for d in self._make_uploader()._build_target_list():
+            if d["ip"] == ip:
+                return d.get("name") or ip
+        return ip
+
+    def _summarize_upload_results(self, results: dict) -> tuple[bool, bool, str]:
+        """(전체 성공, 일부 성공, 로그용 요약 문자열) 반환. results 키는 IP."""
         if not results:
             return False, False, "등록된 기기 없음"
-        ok_names = [n for n, ok in results.items() if ok]
-        fail_names = [n for n, ok in results.items() if not ok]
+        ok_labels = [f"{self._ip_display_name(ip)}({ip})" for ip, ok in results.items() if ok]
+        fail_labels = [f"{self._ip_display_name(ip)}({ip})" for ip, ok in results.items() if not ok]
         parts = []
-        if ok_names:
-            parts.append(f"성공: {', '.join(ok_names)}")
-        if fail_names:
-            parts.append(f"실패: {', '.join(fail_names)}")
-        return all(results.values()), bool(ok_names), " | ".join(parts)
+        if ok_labels:
+            parts.append(f"성공: {', '.join(ok_labels)}")
+        if fail_labels:
+            parts.append(f"실패: {', '.join(fail_labels)}")
+        return all(results.values()), bool(ok_labels), " | ".join(parts)
+
+    def _safe_save_config(self, config: dict, *, parent=None, reload: bool = False) -> bool:
+        """설정 저장. 실패 시 사용자에게 알리고 False 반환."""
+        try:
+            self.service.config_manager.save_config(config)
+            if reload:
+                self.service._reload_config()
+            return True
+        except ConfigSaveError as e:
+            messagebox.showerror("설정 저장 실패", str(e), parent=parent)
+            self._log_message(f"❌ 설정 저장 실패: {e}")
+            return False
+        except Exception as e:
+            messagebox.showerror("설정 저장 실패", str(e), parent=parent)
+            self._log_message(f"❌ 설정 저장 실패: {e}")
+            return False
 
     def _get_log_for_web(self) -> str:
         try:
@@ -761,10 +784,10 @@ class SyncAppGui:
         except ValueError:
             pass
         config.setdefault("calibre_watch", {})["watch_dir"] = self.watch_dir_entry.get().strip()
-        self.service.config_manager.save_config(config)
+        if not self._safe_save_config(config, reload=True):
+            return
         self.calibre.calibre_path = config["calibre_path"]
         self.calibre.library_path = config["calibre_library_path"]
-        self.service._reload_config()
 
     def _save_ai_settings(self):
         config = self.service.config
@@ -775,7 +798,8 @@ class SyncAppGui:
             "model": config.get("ai_summary", {}).get("model", "gpt-4o-mini"),
             "ollama_host": config.get("ai_summary", {}).get("ollama_host", "http://localhost:11434"),
         }
-        self.service.config_manager.save_config(config)
+        if not self._safe_save_config(config):
+            return
         messagebox.showinfo("저장 완료", "AI 요약 설정이 저장되었습니다.")
 
     def _save_trans_settings(self):
@@ -786,7 +810,8 @@ class SyncAppGui:
             "libretranslate_host": config.get("translation", {}).get("libretranslate_host", "http://localhost:5000"),
             "libretranslate_api_key": config.get("translation", {}).get("libretranslate_api_key", ""),
         }
-        self.service.config_manager.save_config(config)
+        if not self._safe_save_config(config):
+            return
         messagebox.showinfo("저장 완료", "번역 설정이 저장되었습니다.")
 
     # ------------------------------------------------------------------
@@ -936,7 +961,7 @@ class SyncAppGui:
             messagebox.showinfo("스케줄러", f"매일 {h}:{m}에 백그라운드 동기화 스케줄이 등록되었습니다.")
             config = self.service.config
             config["schedule"]["enabled"] = True
-            self.service.config_manager.save_config(config)
+            self._safe_save_config(config)
         else:
             messagebox.showerror("스케줄러", "스케줄러 등록에 실패했습니다. 관리자 권한을 확인하세요.")
         self._refresh_schedule_status()
@@ -946,7 +971,7 @@ class SyncAppGui:
             messagebox.showinfo("스케줄러", "스케줄 작업이 해제되었습니다.")
             config = self.service.config
             config["schedule"]["enabled"] = False
-            self.service.config_manager.save_config(config)
+            self._safe_save_config(config)
         else:
             messagebox.showwarning("스케줄러", "스케줄 해제에 실패했거나 등록된 작업이 없습니다.")
         self._refresh_schedule_status()
@@ -972,7 +997,11 @@ class SyncAppGui:
                 if not self._sync_busy:
                     self.calibre_conn_btn.config(state="normal")
             return
-        threading.Thread(target=lambda: self.root.after(0, lambda: self._show_calibre_books(self.calibre.list_books(), silent)), daemon=True).start()
+        def worker():
+            books = self.calibre.list_books()
+            self.root.after(0, lambda: self._show_calibre_books(books, silent))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _show_calibre_books(self, books: list, silent: bool):
         if not self._sync_busy:
@@ -1067,12 +1096,19 @@ class SyncAppGui:
                 return
             config = self.service.config
             devices = config.setdefault("x3_devices", [])
+            primary = (config.get("x3_ip") or "").strip()
+            if ip == primary:
+                messagebox.showwarning("중복", "기본 기기 IP와 동일합니다.", parent=dialog)
+                return
             if any(d.get("ip") == ip for d in devices):
                 messagebox.showwarning("중복", "이미 등록된 IP입니다.", parent=dialog)
                 return
+            if name == "기본 기기" or any(d.get("name") == name for d in devices):
+                messagebox.showwarning("중복", "이미 사용 중인 기기 이름입니다.", parent=dialog)
+                return
             devices.append({"name": name, "ip": ip})
-            self.service.config_manager.save_config(config)
-            self.service._reload_config()
+            if not self._safe_save_config(config, parent=dialog, reload=True):
+                return
             self._refresh_devices_tree()
             dialog.destroy()
 
@@ -1093,8 +1129,8 @@ class SyncAppGui:
             if 0 <= idx < len(devices):
                 devices.pop(idx)
         config["x3_devices"] = devices
-        self.service.config_manager.save_config(config)
-        self.service._reload_config()
+        if not self._safe_save_config(config, reload=True):
+            return
         self._refresh_devices_tree()
 
     # ------------------------------------------------------------------
@@ -1118,7 +1154,8 @@ class SyncAppGui:
         config = self.service.config
         idx = int(selected[0])
         config["sites"][idx]["enabled"] = not config["sites"][idx].get("enabled", True)
-        self.service.config_manager.save_config(config)
+        if not self._safe_save_config(config):
+            return
         self._refresh_site_tree()
 
     def _delete_site(self):
@@ -1130,7 +1167,8 @@ class SyncAppGui:
             return
         config = self.service.config
         config["sites"].pop(int(selected[0]))
-        self.service.config_manager.save_config(config)
+        if not self._safe_save_config(config):
+            return
         self._refresh_site_tree()
 
     def _add_site_popup(self):
@@ -1197,11 +1235,16 @@ class SyncAppGui:
         limit_entry.grid(row=5, column=1, sticky="w", pady=8)
         limit_entry.insert(0, "5")
 
-        # 이미지 포함 / 번역 옵션
+        # 이미지 포함 / 번역 / 상세 페이지 옵션
         opt_frame = ttk.Frame(form)
         opt_frame.grid(row=6, column=0, columnspan=2, sticky="we", pady=5)
         include_img_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="이미지 포함", variable=include_img_var).pack(side="left", padx=5)
+        fetch_detail_var = tk.BooleanVar(value=False)
+        detail_cb = ttk.Checkbutton(
+            opt_frame, text="상세 페이지 본문 (CSS)", variable=fetch_detail_var
+        )
+        detail_cb.pack(side="left", padx=5)
 
         ttk.Label(opt_frame, text="번역:").pack(side="left", padx=(15, 3))
         translate_cb = ttk.Combobox(opt_frame, values=["", "ko", "en", "ja", "zh-cn", "zh-tw"], width=6)
@@ -1214,6 +1257,9 @@ class SyncAppGui:
             state = "disabled" if t in ("rss", "naver", "tistory", "brunch", "youtube", "substack") else "normal"
             for w in (item_entry, title_entry, content_entry, remove_entry):
                 w.config(state=state)
+            detail_cb.config(state="normal" if t == "css" else "disabled")
+            if t != "css":
+                fetch_detail_var.set(False)
 
         type_cb.bind("<<ComboboxSelected>>", on_type_change)
 
@@ -1227,6 +1273,7 @@ class SyncAppGui:
             remove_entry.delete(0, tk.END); remove_entry.insert(0, site_data.get("remove_selectors", ""))
             limit_entry.delete(0, tk.END); limit_entry.insert(0, str(site_data.get("limit", 5)))
             include_img_var.set(site_data.get("include_images", False))
+            fetch_detail_var.set(site_data.get("fetch_detail_page", False))
             translate_cb.set(site_data.get("translate_to", ""))
             on_type_change()
 
@@ -1253,6 +1300,7 @@ class SyncAppGui:
                 "enabled": site_data.get("enabled", True) if site_data else True,
                 "include_images": include_img_var.get(),
                 "translate_to": translate_cb.get().strip(),
+                "fetch_detail_page": bool(fetch_detail_var.get()) if type_cb.get() == "css" else False,
             }
             if type_cb.get() == "css":
                 new_site["item_selector"] = item_entry.get().strip()
@@ -1263,7 +1311,8 @@ class SyncAppGui:
                 config["sites"].append(new_site)
             else:
                 config["sites"][idx] = new_site
-            self.service.config_manager.save_config(config)
+            if not self._safe_save_config(config, parent=dialog):
+                return
             self._refresh_site_tree()
             dialog.destroy()
 
@@ -1279,7 +1328,13 @@ class SyncAppGui:
         for item in self.hist_tree.get_children():
             self.hist_tree.delete(item)
         self._history_url_by_iid.clear()
-        rows = self.service.db.get_history(limit=200)
+        try:
+            rows = self.service.db.get_history(limit=200)
+            count = self.service.db.get_count()
+        except SyncHistoryDbError as e:
+            messagebox.showerror("이력 조회 실패", str(e))
+            self.history_count_label.config(text="이력 조회 실패")
+            return
         for row in rows:
             url = row[0]
             site_name = row[1] if len(row) > 1 else ""
@@ -1294,7 +1349,6 @@ class SyncAppGui:
             self.hist_tree.insert("", "end", iid=iid, values=(
                 site_name or "", display_title, synced_at or "", url or ""
             ))
-        count = self.service.db.get_count()
         self.history_count_label.config(text=f"총 {count}건 기록됨")
 
     def _delete_history_entry(self):
@@ -1304,16 +1358,26 @@ class SyncAppGui:
             return
         if not messagebox.askyesno("확인", f"{len(selected)}개 항목을 삭제하면 다음 동기화 시 재수집됩니다. 계속할까요?"):
             return
-        for iid in selected:
-            url = self._history_url_by_iid.get(iid, iid)
-            self.service.db.delete_entry(url)
+        try:
+            for iid in selected:
+                url = self._history_url_by_iid.get(iid, iid)
+                self.service.db.delete_entry(url)
+        except SyncHistoryDbError as e:
+            messagebox.showerror("이력 삭제 실패", str(e))
+            self._log_message(f"❌ 이력 삭제 실패: {e}")
+            return
         self._refresh_history()
         self._log_message(f"🗑 이력 {len(selected)}건 삭제 완료 (재전송 허용)")
 
     def _clear_all_history(self):
         if not messagebox.askyesno("전체 초기화 확인", "모든 동기화 이력을 삭제합니다.\n다음 동기화 시 모든 기사가 재수집됩니다. 계속할까요?"):
             return
-        self.service.db.clear_all()
+        try:
+            self.service.db.clear_all()
+        except SyncHistoryDbError as e:
+            messagebox.showerror("이력 초기화 실패", str(e))
+            self._log_message(f"❌ 이력 초기화 실패: {e}")
+            return
         self._refresh_history()
         self._log_message("⚠️ 동기화 이력 전체 초기화 완료")
 
@@ -1435,7 +1499,7 @@ class SyncAppGui:
                 # 설정 저장
                 config = self.service.config
                 config["calibre_watch"] = {"enabled": True, "watch_dir": watch_dir}
-                self.service.config_manager.save_config(config)
+                self._safe_save_config(config)
             else:
                 messagebox.showerror("오류", "파일 감시 시작 실패. watchdog 패키지가 설치되어 있는지 확인하세요.")
 

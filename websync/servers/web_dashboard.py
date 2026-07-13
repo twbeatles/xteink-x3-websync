@@ -3,16 +3,44 @@ import os
 import json
 import hmac
 import hashlib
+import secrets
 import threading
+import time
 import http.cookies
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Callable
 
 _session_cookie_name = "x3sync_session"
+_SESSION_MAX_AGE_SEC = 7 * 24 * 3600  # 7일
 
 
-def _session_value(api_token: str) -> str:
-    return hmac.new(api_token.encode("utf-8"), b"x3websync-session-v1", hashlib.sha256).hexdigest()
+def _session_value(api_token: str, issued_at: int | None = None) -> str:
+    """만료 가능한 세션 쿠키 값: {unix_ts}.{hmac}"""
+    ts = int(issued_at if issued_at is not None else time.time())
+    msg = f"x3websync-session-v2|{ts}".encode("utf-8")
+    sig = hmac.new(api_token.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return f"{ts}.{sig}"
+
+
+def _session_valid(api_token: str, cookie_val: str | None) -> bool:
+    if not api_token or not cookie_val or "." not in cookie_val:
+        return False
+    try:
+        ts_s, sig = cookie_val.split(".", 1)
+        ts = int(ts_s)
+        if time.time() - ts > _SESSION_MAX_AGE_SEC or ts > time.time() + 300:
+            return False
+        expected = _session_value(api_token, issued_at=ts)
+        # compare full cookie to avoid partial leaks
+        return secrets.compare_digest(cookie_val, expected)
+    except (ValueError, TypeError):
+        return False
+
+
+def _token_matches(provided: str | None, expected: str) -> bool:
+    if not provided or not expected:
+        return False
+    return secrets.compare_digest(provided, expected)
 
 
 def _login_html() -> str:
@@ -177,10 +205,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not token:
             return False
         auth = self.headers.get("Authorization", "")
-        if auth == f"Bearer {token}":
+        if auth.startswith("Bearer ") and _token_matches(auth[7:].strip(), token):
             return True
         session = self._get_cookie(_session_cookie_name)
-        return session == _session_value(token)
+        return _session_valid(token, session)
 
     def _require_auth(self) -> bool:
         if self._is_authenticated():
@@ -249,20 +277,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": "API 토큰이 설정되지 않았습니다."})
                 return
             auth = self.headers.get("Authorization", "")
-            token_ok = auth == f"Bearer {token}"
+            token_ok = auth.startswith("Bearer ") and _token_matches(auth[7:].strip(), token)
             if not token_ok:
                 try:
                     length = int(self.headers.get("Content-Length", 0))
                     body = self.rfile.read(length).decode("utf-8") if length else "{}"
                     data = json.loads(body or "{}")
-                    token_ok = data.get("token") == token
+                    token_ok = _token_matches(str(data.get("token") or ""), token)
                 except Exception:
                     token_ok = False
             if not token_ok:
                 self._send_json(401, {"error": "잘못된 API 토큰입니다."})
                 return
             session_val = _session_value(token)
-            cookie_flags = "Path=/; HttpOnly; SameSite=Strict"
+            cookie_flags = (
+                f"Path=/; HttpOnly; SameSite=Strict; Max-Age={_SESSION_MAX_AGE_SEC}"
+            )
             if self._ctx.allow_lan:
                 cookie_flags += "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             self.send_response(200)

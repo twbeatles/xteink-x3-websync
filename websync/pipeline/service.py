@@ -11,12 +11,14 @@ from websync.core.logger import get_logger
 from websync.pipeline.summarizer import Summarizer
 from websync.pipeline.translator import Translator
 from websync.core.article import ensure_article_url
-from websync.core.paths import resolve_path
+from websync.core.process_lock import ProcessFileLock
+
 
 class SyncService:
     """전체 동기화 비즈니스 로직 조율을 전담하는 클래스"""
     _pipeline_lock = threading.Lock()
     _last_pipeline_result: dict = {}
+    _process_lock = ProcessFileLock()
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
@@ -38,7 +40,9 @@ class SyncService:
         )
 
     def is_pipeline_running(self) -> bool:
-        return self._pipeline_lock.locked()
+        if self._pipeline_lock.locked() or self._process_lock.held:
+            return True
+        return self._process_lock.is_held_by_other()
 
     def get_last_pipeline_result(self) -> dict:
         return dict(self._last_pipeline_result)
@@ -76,9 +80,20 @@ class SyncService:
                 print(msg)
             return False
 
+        if not self._process_lock.acquire(blocking=False):
+            self._pipeline_lock.release()
+            msg = "⚠️ 다른 프로세스에서 동기화가 실행 중입니다. 완료 후 다시 시도해 주세요."
+            self.logger.warning(msg)
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+            return False
+
         try:
             return self._run_sync_pipeline_locked(log_callback, progress_callback)
         finally:
+            self._process_lock.release()
             self._pipeline_lock.release()
 
     def _run_sync_pipeline_locked(
@@ -115,7 +130,7 @@ class SyncService:
         generate_cover = self.config.get("epub_cover", True)
         upload_targets = self.uploader._build_target_list()
         target_ips = [d["ip"] for d in upload_targets]
-        name_to_ip = {d["name"]: d["ip"] for d in upload_targets}
+        ip_to_name = {d["ip"]: d["name"] for d in upload_targets}
 
         for site_idx, site in enumerate(enabled_sites):
             name = site.get("name", "무명 사이트")
@@ -130,6 +145,11 @@ class SyncService:
             try:
                 scraper = ScraperFactory.get_scraper(scraper_type)
                 articles = scraper.fetch_articles(site)
+
+                fetch_stats = getattr(scraper, "last_fetch_stats", None) or {}
+                skipped_items = int(fetch_stats.get("skipped", 0) or 0)
+                if skipped_items:
+                    log(f"   => ⚠️ 수집 중 개별 스킵 {skipped_items}건 (본문·자막 실패 등)")
 
                 if not articles:
                     empty_fetch_sites += 1
@@ -155,8 +175,24 @@ class SyncService:
                     log(f"   => 💡 [{name}] 전송할 신규 포스트가 없습니다.")
                     continue
 
+                # 이번 배치 중 하나라도 미전송인 기기만 업로드 대상
+                pending_ips: list[str] = []
+                pending_set: set[str] = set()
+                for ip in target_ips:
+                    if any(not self.db.is_synced_for_device(art["url"], ip) for art in new_articles):
+                        if ip not in pending_set:
+                            pending_set.add(ip)
+                            pending_ips.append(ip)
+
+                if not pending_ips:
+                    log(f"   => 💡 [{name}] 전송할 대상 기기가 없습니다.")
+                    continue
+
                 actual_work_sites += 1
                 log(f"📦 [{name}] 신규 포스트 {len(new_articles)}개 검출. 후처리 중...")
+                if len(pending_ips) < len(target_ips):
+                    names = [ip_to_name.get(ip, ip) for ip in pending_ips]
+                    log(f"   => 📡 미전송 기기만 전송: {', '.join(names)}")
 
                 if translate_to and translator.is_available_for_site(translate_to):
                     log(f"   => 🌐 [{name}] '{translate_to}' 언어로 번역 중...")
@@ -172,28 +208,28 @@ class SyncService:
                 epub_path = self.epub_builder.build(name, new_articles, generate_cover=generate_cover)
                 log(f"   => 파일 생성: {os.path.basename(epub_path)}")
 
-                upload_results = self.uploader.upload_to_targets(epub_path)
-                for dev_name, ok in upload_results.items():
+                upload_results = self.uploader.upload_to_targets(epub_path, only_ips=pending_ips)
+                for ip, ok in upload_results.items():
                     status = "✅" if ok else "❌"
-                    log(f"   => {status} [{dev_name}] 전송")
+                    log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송")
 
                 any_ok = bool(upload_results) and any(upload_results.values())
-                all_ok = bool(upload_results) and all(upload_results.values())
+                all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
 
                 if any_ok:
-                    for dev_name, ok in upload_results.items():
+                    for ip, ok in upload_results.items():
                         if not ok:
                             continue
-                        device_ip = name_to_ip.get(dev_name, dev_name)
                         for art in new_articles:
-                            self.db.mark_synced(
-                                art["url"], name, art.get("title", ""), device_ip=device_ip
-                            )
+                            if not self.db.is_synced_for_device(art["url"], ip):
+                                self.db.mark_synced(
+                                    art["url"], name, art.get("title", ""), device_ip=ip
+                                )
                     if all_ok:
                         log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
                         success_count += 1
                     else:
-                        failed = [n for n, ok in upload_results.items() if not ok]
+                        failed = [ip_to_name.get(ip, ip) for ip, ok in upload_results.items() if not ok]
                         log(
                             f"⚠️ [{name}] 일부 기기 전송 실패: {', '.join(failed)} "
                             f"(성공 기기만 이력 기록, 실패 기기는 다음 동기화에서 재시도)"

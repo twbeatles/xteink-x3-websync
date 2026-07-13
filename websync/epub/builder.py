@@ -99,12 +99,25 @@ class EpubBuilder:
         spine = ["nav"]
         toc = []
 
+        # CSS 삽입 값 최소 검증 (설정 파일 오염 방어)
+        safe_font = "".join(
+            c for c in str(self.font_family or "serif") if c.isalnum() or c in (" ", "-", "_", ",", "'")
+        ).strip() or "serif"
+        try:
+            safe_size = max(8, min(48, int(self.font_size)))
+        except (TypeError, ValueError):
+            safe_size = 16
+        try:
+            safe_lh = max(1.0, min(3.0, float(self.line_height)))
+        except (TypeError, ValueError):
+            safe_lh = 1.7
+
         custom_css = f"""
         body {{
-            font-family: {self.font_family}, serif, sans-serif;
+            font-family: {safe_font}, serif, sans-serif;
             padding: 5px;
-            line-height: {self.line_height};
-            font-size: {self.font_size}px;
+            line-height: {safe_lh};
+            font-size: {safe_size}px;
             color: #000000;
             background-color: #ffffff;
             text-align: justify;

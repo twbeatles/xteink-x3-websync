@@ -26,7 +26,8 @@ xteink-x3-websync/
 ├── x3_websync.spec            # PyInstaller 빌드 스펙
 ├── websync/                   # 메인 패키지 (SOLID 기반 역할별 분리)
 │   ├── core/
-│   │   ├── paths.py           # 프로젝트 루트 기준 경로 해석 (PROJECT_ROOT)
+│   │   ├── paths.py           # PROJECT_ROOT (개발: 패키지 상위, frozen: exe 디렉터리)
+│   │   ├── process_lock.py    # 크로스 프로세스 파이프라인 파일 락
 │   │   ├── article.py         # 기사 URL / synthetic key 유틸
 │   │   └── logger.py          # 날짜별 로그 파일
 │   ├── config/
@@ -82,8 +83,8 @@ xteink-x3-websync/
 |------|------|
 | 역할 | CLI `--sync` 플래그 분기 / GUI 앱 기동 |
 | 보안 패치 | `NullWriter` 클래스로 pythonw.exe stdout=None 방어 |
-| 다중 실행 방지 | GUI만 `tempfile.gettempdir()/x3_websync_instance.lock` 단일 인스턴스 락 |
-| `--sync` 모드 | GUI 락 없이 기동 — `SyncService._pipeline_lock`만으로 중복 실행 방지 |
+| 다중 실행 방지 | GUI: Windows named mutex + 락 파일 / Unix flock |
+| `--sync` 모드 | GUI 락 없이 기동 — `threading.Lock` + **프로세스 파일 락**으로 직렬화 |
 | 주의 | GUI 락은 `finally`에서 항상 해제됨 |
 
 **호출 관계**:
@@ -123,14 +124,17 @@ main()
   "sites": [
     {
       "name": "사이트명",
-      "type": "css | rss | naver",
+      "type": "css | rss | naver | tistory | brunch | youtube | substack",
       "url": "https://...",
       "item_selector": ".post-item",
       "title_selector": ".post-title",
       "content_selector": ".post-content",
       "remove_selectors": ".ad, #comments",
       "limit": 5,
-      "enabled": true
+      "enabled": true,
+      "include_images": false,
+      "translate_to": "",
+      "fetch_detail_page": false
     }
   ],
   "schedule": {"enabled": false, "hour": "07", "minute": "00"},
@@ -149,21 +153,25 @@ main()
 | 항목 | 내용 |
 |------|------|
 | 역할 | 스크래핑 → 중복 필터 → EPUB 빌드 → 기기 업로드 전 과정 총괄 |
-| 중복 필터 | `SyncHistoryDb.is_synced(url)` 로 이미 보낸 기사 스킵 |
-| 결과 반환 | `bool` — True: 전 사이트 신규 없음·전체 전송 성공 / False: 오류·부분 실패·이미 실행 중 |
+| 동시성 | `threading.Lock` + `ProcessFileLock` (GUI / `--sync` 프로세스 간 직렬화) |
+| 중복 필터 | `needs_sync(url, target_ips)` — 기기 중 하나라도 미전송이면 포함 |
+| 재전송 | `upload_to_targets(..., only_ips=pending)` — **미전송 기기만** 업로드 |
+| 결과 반환 | `bool` — True: 신규 없음·전체 성공 / False: 오류·부분 실패·이미 실행 중 |
 | 상태 API | `get_last_pipeline_result()` — 웹 대시보드 `/api/status` 연동 |
 
 **파이프라인 흐름**:
 ```
 run_sync_pipeline()
+  0. thread lock + process file lock (비차단, 실패 시 return False)
   1. config 최신 리로드
   2. enabled_sites 필터링
   3. for each site:
      a. ScraperFactory.get_scraper(type).fetch_articles(site)
-     b. [신규 기사] = is_synced() 필터링 (DB 오류 시 SyncHistoryDbError → 중단)
-     c. EpubBuilder.build(name, new_articles) → epub_path
-     d. X3Uploader.upload_to_targets(epub_path)  # 기본 + x3_devices
-     e. [1대 이상 성공 시] db.mark_synced(url, name, title)
+     b. [신규] = needs_sync(url, target_ips) 필터 (DB 오류 → SyncHistoryDbError 중단)
+     c. pending_ips = 배치 내 미전송 기기
+     d. (선택) 번역 / AI 요약
+     e. EpubBuilder.build → upload_to_targets(only_ips=pending_ips)  # 결과 키=IP
+     f. 성공 IP만 mark_synced(..., device_ip=ip)
   4. ToastNotifier.show_toast(결과)
 ```
 
@@ -174,9 +182,10 @@ run_sync_pipeline()
 | 클래스 | 타입 | 방식 |
 |--------|------|------|
 | `BaseScraper` | ABC | 추상 기반 클래스 |
-| `CssSelectorScraper` | `"css"` | CSS 선택자로 HTML 파싱 |
+| `CssSelectorScraper` | `"css"` | CSS 선택자; 옵션 `fetch_detail_page` 시 상세 URL 본문 |
 | `RssScraper` | `"rss"` | RSS/Atom XML 파싱 |
 | `NaverBlogScraper` | `"naver"` | RSS 리스팅 + PostView.naver iframe 우회 |
+| `TistoryScraper` 등 | tistory/brunch/youtube/substack | 전용 수집; 개별 스킵 통계·전량 실패 시 예외 |
 | `ScraperFactory` | — | `.get_scraper(type)` / `.register_scraper()` |
 
 **NaverBlogScraper 특이사항**:
@@ -192,9 +201,10 @@ run_sync_pipeline()
 | 항목 | 내용 |
 |------|------|
 | 역할 | 기사 배열을 받아 단일 EPUB 파일 생성 |
-| 의존성 | `ebooklib` |
+| 의존성 | `ebooklib` (+ 선택 Pillow 표지) |
 | 언어 메타 | `lang="ko"` 설정, UTF-8 인코딩 명시 |
-| CSS | `font-family`, `font-size`, `line-height` 설정 가능 |
+| CSS | font/size/line-height **범위·문자 검증** 후 삽입 |
+| 본문 | `script`/`style` 태그 제거 |
 | 파일명 | `{site_name}_{YYYY-MM-DD}.epub` |
 
 ---
@@ -205,6 +215,8 @@ run_sync_pipeline()
 |------|------|
 | 역할 | X3 기기의 `/upload` HTTP 엔드포인트로 파일 POST |
 | 파일명 | 영숫자·하이픈·언더바만 허용 (CrossPoint 크래시 방지) |
+| 결과 | `{ip: bool}` — 기기 **IP/호스트**를 키로 사용 |
+| 부분 전송 | `only_ips=[...]` 로 대상 기기 제한 |
 | 타임아웃 | `25초 + (파일크기_MB × 5초)` 동적 계산 |
 | 연결 테스트 | `GET /` 3초 타임아웃으로 기기 생존 여부 확인 |
 
@@ -283,16 +295,18 @@ run_sync_pipeline()
             │     ├─ RssScraper                  ──► RSS/Atom XML
             │     └─ NaverBlogScraper            ──► 네이버 RSS + PostView API
             │
-            ├─ SyncHistoryDb.is_synced(url)      ──► sync_history.db (중복 제거)
+            ├─ SyncHistoryDb.needs_sync(url, ips)──► sync_history.db (기기별 중복 제거)
             ├─ EpubBuilder.build()               ──► output/*.epub
-            ├─ X3Uploader.upload()               ──► http://{x3_ip}/upload (기기 전송)
-            ├─ SyncHistoryDb.mark_synced()       ──► sync_history.db (이력 기록)
-            └─ ToastNotifier.show_toast()        ──► 윈도우 토스트 알림
+            ├─ X3Uploader.upload_to_targets()    ──► http://{ip}/upload (미전송 기기만)
+            ├─ SyncHistoryDb.mark_synced(..., device_ip)
+            └─ ToastNotifier.show_toast()        ──► 크로스플랫폼 토스트 알림
 ```
 
 ---
 
 ## 5. 기능 확장 아이디어 (Feature Roadmap)
+
+> **참고 (2026-07-13)**: 아래 HIGH/MEDIUM 항목 중 상당수(로그, 진행률, 이력 탭, 전용 스크래퍼, AI 요약, 표지, 번역, OPDS, 다중 기기, Watch, 웹 대시보드, frozen 경로·프로세스 락 등)는 **이미 구현**되었습니다. 신규 작업 전 `PROJECT_AUDIT.md`와 코드 현황을 확인하세요. 아래 목록은 초기 로드맵 기록으로 유지합니다.
 
 현재 아키텍처는 SOLID 원칙 기반으로 설계되어 있어 아래 기능들을 비교적 깔끔하게 추가할 수 있습니다.
 
@@ -460,6 +474,8 @@ DEFAULT_CONFIG = {
 | 증상 | 원인 | 해결책 |
 |------|------|--------|
 | 스케줄러 실행 후 동기화 안됨 | 작업 경로 유실 → config.json 못 읽음 | `websync/scheduler/manager.py`의 `cd /d` 경로 확인 |
+| EXE에서 설정·이력이 사라짐 | (구버전) PROJECT_ROOT가 임시 폴더 | `paths.py` frozen → exe 디렉터리 확인; 최신 빌드 사용 |
+| `동기화가 이미 실행 중` | GUI와 `--sync` 또는 이중 실행 | 정상 방어 — `process_lock` / pipeline lock 대기 후 재시도 |
 | `database is locked` 오류 | 동시 동기화 실행 | `websync/db/history.py`의 `timeout=10.0` 및 Lock 확인 |
 | 네이버 포스트 본문 없음 | `div.se-main-container` 미발견 | `#postViewArea` 폴백 확인, 네이버 HTML 구조 변경 여부 점검 |
 | CrossPoint 기기 크래시 | 한글/공백 파일명 전송 | `websync/upload/uploader.py` 세니타이징 로직 확인 |

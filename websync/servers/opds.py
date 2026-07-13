@@ -1,10 +1,12 @@
 """OPDS 카탈로그 HTTP 서버"""
 import os
 import re
+import secrets
 import threading
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
+from urllib.parse import quote, unquote, urlparse, parse_qs
 
 
 class _OPDSHTTPServer(HTTPServer):
@@ -33,6 +35,12 @@ class OPDSHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _token_ok(self, provided: str | None) -> bool:
+        expected = self._ctx.api_key or ""
+        if not provided or not expected:
+            return False
+        return secrets.compare_digest(provided, expected)
+
     def _check_auth(self) -> bool:
         ctx = self._ctx
         if not ctx.require_auth:
@@ -40,14 +48,14 @@ class OPDSHandler(BaseHTTPRequestHandler):
         if not ctx.api_key:
             return False
         auth = self.headers.get("Authorization", "")
-        if auth == f"Bearer {ctx.api_key}":
-            return True
-        from urllib.parse import urlparse, parse_qs
-        qs = parse_qs(urlparse(self.path).query)
-        if qs.get("api_key", [None])[0] == ctx.api_key:
+        if auth.startswith("Bearer ") and self._token_ok(auth[7:].strip()):
             return True
         api_header = self.headers.get("X-Api-Key", "")
-        if api_header == ctx.api_key:
+        if self._token_ok(api_header):
+            return True
+        # 하위 호환: 쿼리 api_key (로그 유출 위험 — 비권장)
+        qs = parse_qs(urlparse(self.path).query)
+        if self._token_ok(qs.get("api_key", [None])[0]):
             return True
         self.send_error(401, "Unauthorized")
         return False
@@ -79,13 +87,14 @@ class OPDSHandler(BaseHTTPRequestHandler):
             safe_name = fname.replace("&", "&amp;").replace("<", "&lt;")
             title = re.sub(r"_\d{4}-\d{2}-\d{2}\.epub$", "", fname.replace("_", " ")).strip()
             mtime = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            href = f"/opds/download/{quote(fname, safe='')}"
             entries += f"""
   <entry>
     <title>{safe_name}</title>
-    <id>urn:x3sync:{fname}</id>
+    <id>urn:x3sync:{safe_name}</id>
     <updated>{mtime}</updated>
     <summary>{title} ({size // 1024} KB)</summary>
-    <link rel="http://opds-spec.org/acquisition" href="/opds/download/{fname}" type="application/epub+zip"/>
+    <link rel="http://opds-spec.org/acquisition" href="{href}" type="application/epub+zip"/>
   </entry>"""
 
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -105,18 +114,31 @@ class OPDSHandler(BaseHTTPRequestHandler):
 
     def _serve_file(self):
         path = self.path.split("?", 1)[0]
-        fname = path[len("/opds/download/"):]
-        fname = os.path.basename(fname)
+        raw = path[len("/opds/download/"):]
+        fname = os.path.basename(unquote(raw))
         if not fname.lower().endswith(".epub"):
             self.send_error(403)
             return
         fpath = os.path.join(self._ctx.output_dir, fname)
+        # output_dir 밖 탈출 방지
+        try:
+            real_out = os.path.realpath(self._ctx.output_dir)
+            real_file = os.path.realpath(fpath)
+            if not real_file.startswith(real_out + os.sep) and real_file != real_out:
+                self.send_error(403)
+                return
+        except OSError:
+            self.send_error(404)
+            return
         if not os.path.isfile(fpath):
             self.send_error(404)
             return
         self.send_response(200)
         self.send_header("Content-Type", "application/epub+zip")
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        # HTTP 헤더는 latin-1 — 비ASCII 파일명은 RFC 5987 filename* 사용
+        ascii_name = "".join(c if ord(c) < 128 else "_" for c in fname) or "book.epub"
+        disp = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname, safe='')}"
+        self.send_header("Content-Disposition", disp)
         self.send_header("Content-Length", str(os.path.getsize(fpath)))
         self.end_headers()
         with open(fpath, "rb") as f:

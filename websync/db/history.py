@@ -94,6 +94,14 @@ class SyncHistoryDb:
             return not self.is_synced(url)
         return any(not self.is_synced_for_device(url, ip) for ip in target_ips)
 
+    def pending_device_ips(self, url: str, target_ips: list[str]) -> list[str]:
+        """아직 전송되지 않은 기기 IP 목록."""
+        if not url:
+            return []
+        if not target_ips:
+            return [] if self.is_synced(url) else []
+        return [ip for ip in target_ips if not self.is_synced_for_device(url, ip)]
+
     def is_synced(self, url: str) -> bool:
         """URL에 동기화 이력이 존재하는지 (레거시·기기별 포함)."""
         if not url:
@@ -144,8 +152,7 @@ class SyncHistoryDb:
                     )
                     return cursor.fetchall()
             except Exception as e:
-                print(f"⚠️ DB 이력 조회 실패: {e}")
-                return []
+                raise SyncHistoryDbError(f"DB 이력 조회 실패: {e}") from e
 
     def delete_entry(self, url: str):
         """특정 URL의 모든 기기 동기화 이력 삭제 (재전송 허용)."""
@@ -158,7 +165,7 @@ class SyncHistoryDb:
                     cursor.execute("DELETE FROM synced_posts WHERE url = ?", (url,))
                     conn.commit()
             except Exception as e:
-                print(f"❌ DB 이력 삭제 실패: {e}")
+                raise SyncHistoryDbError(f"DB 이력 삭제 실패: {e}") from e
 
     def clear_all(self):
         """모든 동기화 이력 초기화"""
@@ -169,7 +176,7 @@ class SyncHistoryDb:
                     cursor.execute("DELETE FROM synced_posts")
                     conn.commit()
             except Exception as e:
-                print(f"❌ DB 전체 초기화 실패: {e}")
+                raise SyncHistoryDbError(f"DB 전체 초기화 실패: {e}") from e
 
     def get_count(self) -> int:
         """고유 URL 이력 건수 반환"""
@@ -180,5 +187,5 @@ class SyncHistoryDb:
                     cursor.execute("SELECT COUNT(DISTINCT url) FROM synced_posts")
                     row = cursor.fetchone()
                     return row[0] if row else 0
-            except Exception:
-                return 0
+            except Exception as e:
+                raise SyncHistoryDbError(f"DB 건수 조회 실패: {e}") from e

@@ -5,10 +5,16 @@ from bs4 import BeautifulSoup
 
 class TistoryScraper(BaseScraper):
     """티스토리 블로그 전용 스크래퍼 - RSS에서 URL 추출 후 본문 직접 수집"""
+
+    def __init__(self):
+        self.last_fetch_stats: dict = {}
+
     def fetch_articles(self, site_config: dict) -> list:
+        self.last_fetch_stats = {"skipped": 0}
         url = site_config.get("url", "")
         limit = site_config.get("limit", 5)
         articles = []
+        skipped = 0
         try:
             # RSS 피드에서 글 목록 수집
             rss_url = url if url.endswith("/rss") else url.rstrip("/") + "/rss"
@@ -20,6 +26,7 @@ class TistoryScraper(BaseScraper):
                 title_tag = item.find("title")
                 link_tag = item.find("link")
                 if not title_tag or not link_tag:
+                    skipped += 1
                     continue
                 title = title_tag.get_text(strip=True)
                 post_url = link_tag.get_text(strip=True) if link_tag else ""
@@ -30,7 +37,14 @@ class TistoryScraper(BaseScraper):
                 if content:
                     post_url = ensure_article_url(post_url, url, title)
                     articles.append({"title": title, "content": content, "url": post_url})
+                else:
+                    skipped += 1
+            self.last_fetch_stats = {"skipped": skipped}
+            if items and not articles:
+                raise Exception(f"RSS 항목 {len(items)}건 중 본문 수집 성공 0건")
         except Exception as e:
+            if "본문 수집 성공 0건" in str(e) or "티스토리 블로그 수집 실패" in str(e):
+                raise
             raise Exception(f"티스토리 블로그 수집 실패: {e}") from e
         return articles
 

@@ -92,12 +92,14 @@ python x3_websync.py --sync
 
 ### 기본 설정
 - **X3 주소**: Wi-Fi IP 또는 `crosspoint.local`
-- **추가 기기**: GUI에서 다중 기기 등록
-- **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성)
-- **동기화 이력**: URL·기기(`device_ip`) 단위 — 부분 전송 성공 기기만 이력 기록, 실패 기기는 다음 동기화에서 재시도
+- **추가 기기**: GUI에서 다중 기기 등록 (IP·표시 이름 중복 불가)
+- **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성, 세션 약 7일)
+- **동기화 이력**: URL·기기(`device_ip`) 단위 — 성공 기기만 이력 기록
+- **부분 재시도**: 다음 동기화 시 **아직 받지 못한 기기만** 재업로드 (이미 성공한 기기는 스킵)
+- **동시 실행**: GUI 수동 동기화와 스케줄 `--sync`는 프로세스 파일 락으로 직렬화됩니다
 
 ### 보안·프라이버시 참고
-- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수)
+- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수; Bearer/`X-Api-Key` 권장)
 - **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만 LAN 공개 사용
 - **AI 요약·번역**: 활성화 시 기사 본문이 외부 API(OpenAI 등)로 전송될 수 있음. API 키는 `config.json`에 로컬 저장
 
@@ -114,7 +116,7 @@ python x3_websync.py --sync
 ```bash
 python -m pytest tests/ -q
 ```
-현재 **50건** (db, pipeline, scheduler, scrapers, servers, uploader 등).
+단위·통합 테스트 (`pytest tests/`) — pipeline, db, servers, uploader, paths, process_lock, epub 등.
 
 ### Windows EXE 빌드 (PyInstaller)
 ```bash
@@ -122,3 +124,13 @@ pip install pyinstaller
 pyinstaller x3_websync.spec
 ```
 빌드 결과물: `dist/x3_websync.exe` (GUI 모드, 콘솔 없음)
+
+**EXE 빌드 시 제외되는 선택 기능** (`x3_websync.spec` excludes):
+| 기능 | 제외 패키지 | 소스 실행 시 |
+|------|-------------|--------------|
+| EPUB 표지 이미지 | Pillow | `requirements-optional.txt` |
+| YouTube 자막 | youtube-transcript-api | 동일 |
+| Calibre Watch | watchdog | 동일 |
+| googletrans 번역 | googletrans | 동일 |
+
+EXE는 실행 파일과 같은 폴더에 `config.json` / `sync_history.db` / `logs` / `output`을 둡니다.

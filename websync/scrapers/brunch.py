@@ -5,10 +5,16 @@ from bs4 import BeautifulSoup
 
 class BrunchScraper(BaseScraper):
     """카카오 브런치 전용 스크래퍼"""
+
+    def __init__(self):
+        self.last_fetch_stats: dict = {}
+
     def fetch_articles(self, site_config: dict) -> list:
+        self.last_fetch_stats = {"skipped": 0}
         url = site_config.get("url", "")  # 예: https://brunch.co.kr/@authorid
         limit = site_config.get("limit", 5)
         articles = []
+        skipped = 0
         try:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
@@ -20,6 +26,7 @@ class BrunchScraper(BaseScraper):
             for a_tag in links:
                 href = a_tag.get("href", "")
                 if not href:
+                    skipped += 1
                     continue
                 if not href.startswith("http"):
                     href = "https://brunch.co.kr" + href
@@ -29,7 +36,14 @@ class BrunchScraper(BaseScraper):
                 if content:
                     href = ensure_article_url(href, url, title)
                     articles.append({"title": title, "content": content, "url": href})
+                else:
+                    skipped += 1
+            self.last_fetch_stats = {"skipped": skipped}
+            if links and not articles:
+                raise Exception(f"목록 {len(links)}건 중 본문 수집 성공 0건")
         except Exception as e:
+            if "본문 수집 성공 0건" in str(e) or "브런치 수집 실패" in str(e):
+                raise
             raise Exception(f"브런치 수집 실패: {e}") from e
         return articles
 
