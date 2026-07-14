@@ -705,6 +705,10 @@ class SyncTab(ttk.Frame):
         ttk.Button(btn_bar, text="★ 선택 기사 기기로 전송", command=run_selected_sync).pack(side="right")
 
     def _run_selected_sync_task(self, selected_articles):
+        if self.service.is_pipeline_running():
+            messagebox.showwarning("실행 제한", "현재 다른 동기화 작업이 실행 중입니다. 완료 후 다시 시도해 주세요.")
+            return
+
         self.app._set_sync_ui_busy(True)
         self.app.bottom_bar.progress_bar["value"] = 0
         self.app._log_message(f"\n=== 선택 기사 {len(selected_articles)}건 동기화 실행 ===")
@@ -716,3 +720,4 @@ class SyncTab(ttk.Frame):
             self.master.after(0, self.app._sync_finished_ui)
 
         threading.Thread(target=task, daemon=True).start()
+

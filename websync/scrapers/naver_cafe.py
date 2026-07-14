@@ -35,6 +35,8 @@ class NaverCafeScraper(BaseScraper):
             mobile_url = f"https://m.cafe.naver.com/ca-fe/web/cafes/{cafe_id}/articles?page=1&pageSize={limit}"
             resp = requests.get(mobile_url, headers={**HEADERS, "Referer": f"https://m.cafe.naver.com/{cafe_id}"}, timeout=15)
             resp.raise_for_status()
+            resp.encoding = resp.apparent_encoding
+
 
             # JSON API 응답 파싱 시도
             try:
@@ -81,7 +83,9 @@ class NaverCafeScraper(BaseScraper):
             content_url = f"https://m.cafe.naver.com/ca-fe/web/cafes/{cafe_id}/articles/{article_id}"
             resp = requests.get(content_url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
+            resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")
+
 
             # 본문 컨테이너 다중 후보
             container = (

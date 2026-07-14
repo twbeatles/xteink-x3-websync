@@ -4,12 +4,15 @@ import html
 from datetime import datetime
 from ebooklib import epub
 from bs4 import BeautifulSoup
+from websync.core.logger import get_logger
 
 class EpubBuilder:
     """수집된 기사 데이터를 받아 EPUB 파일로 빌드하는 역할을 전담하는 클래스"""
     def __init__(self, output_dir: str = "./output", font_family: str = "serif", font_size: int = 16, line_height: float = 1.7,
                  epub_theme: str = "default", epub_custom_css: str = ""):
+        self.logger = get_logger()
         self.output_dir = output_dir
+
         self.font_family = font_family
         self.font_size = font_size
         self.line_height = line_height
@@ -26,8 +29,8 @@ class EpubBuilder:
             try:
                 with open(self.epub_custom_css, "r", encoding="utf-8") as f:
                     css_text = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.warning(f"커스텀 CSS 파일 로드 실패 ({self.epub_custom_css}): {e}")
         elif self.epub_theme != "default":
             if getattr(sys, "frozen", False):
                 if hasattr(sys, "_MEIPASS"):
@@ -40,8 +43,9 @@ class EpubBuilder:
             try:
                 with open(theme_path, "r", encoding="utf-8") as f:
                     css_text = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.warning(f"프리셋 테마 CSS 파일 로드 실패 ({theme_path}): {e}")
+
         
         if css_text:
             css_text = css_text.replace("{{font_family}}", self.font_family)

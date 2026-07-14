@@ -26,7 +26,9 @@ class NaverPostScraper(BaseScraper):
             # 네이버 포스트 작성자 페이지
             resp = requests.get(url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
+            resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")
+
 
             # 글 링크 추출
             post_links = soup.select("a.spot_post_area, a.link_end, ul.lst_feed li a")
@@ -68,7 +70,9 @@ class NaverPostScraper(BaseScraper):
         try:
             resp = requests.get(post_url, headers=HEADERS, timeout=15)
             resp.raise_for_status()
+            resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")
+
 
             container = (
                 soup.select_one("div.__viewer_container")

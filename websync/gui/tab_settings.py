@@ -293,18 +293,32 @@ class SettingsTab(ttk.Frame):
                 messagebox.showerror("오류", "유효한 감시 폴더를 선택해 주세요.")
                 return
             def on_new_file(fpath: str):
-                self.app._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 자동 전송 시작")
+                self.app._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 자동 전송 대기 중")
                 def upload_task():
-                    results = self.app._make_uploader().upload_to_targets(fpath)
-                    all_ok, any_ok, summary = self.app._summarize_upload_results(results)
-                    if all_ok:
-                        msg = f"🎉 자동 전송 성공: {os.path.basename(fpath)} ({summary})"
-                    elif any_ok:
-                        msg = f"⚠️ 자동 부분 전송: {os.path.basename(fpath)} ({summary})"
-                    else:
-                        msg = f"❌ 자동 전송 실패: {os.path.basename(fpath)} ({summary})"
-                    self.app.root.after(0, lambda m=msg: self.app._log_message(m))
+                    pipeline_acquired = False
+                    process_acquired = False
+                    try:
+                        # 파이프라인 락 및 프로세스 락 순차 획득 (데드락 방지 차원)
+                        pipeline_acquired = self.service._pipeline_lock.acquire(blocking=True)
+                        process_acquired = self.service._process_lock.acquire(blocking=True)
+
+                        self.app.root.after(0, lambda: self.app._log_message(f"📡 자동 전송 시작: {os.path.basename(fpath)}"))
+                        results = self.app._make_uploader().upload_to_targets(fpath)
+                        all_ok, any_ok, summary = self.app._summarize_upload_results(results)
+                        if all_ok:
+                            msg = f"🎉 자동 전송 성공: {os.path.basename(fpath)} ({summary})"
+                        elif any_ok:
+                            msg = f"⚠️ 자동 부분 전송: {os.path.basename(fpath)} ({summary})"
+                        else:
+                            msg = f"❌ 자동 전송 실패: {os.path.basename(fpath)} ({summary})"
+                        self.app.root.after(0, lambda m=msg: self.app._log_message(m))
+                    finally:
+                        if process_acquired:
+                            self.service._process_lock.release()
+                        if pipeline_acquired:
+                            self.service._pipeline_lock.release()
                 threading.Thread(target=upload_task, daemon=True).start()
+
 
             self.app._calibre_watcher = CalibreWatcher(watch_dir, on_new_file)
             if self.app._calibre_watcher.start():

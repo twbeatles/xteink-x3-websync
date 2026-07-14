@@ -1,206 +1,130 @@
 # Project Audit
 
-> **감사 일자**: 2026-07-13  
-> **최종 갱신**: 2026-07-13 (§3~§5 권장 수정 **구현 완료** 반영)  
-> **감사 범위**: 기능 구현 관점 (예외 처리·입력 검증·상태/데이터 흐름·동시성·경로/인코딩·보안·테스트·문서 정합성)  
-> **분석 도구**: `README.md`, `CLAUDE.md`, CodeGraph MCP, `pytest`  
-> **테스트 결과**: `python -m pytest tests/ -q` → **63 passed**
-
----
-
 ## 1. Executive Summary
 
-Xteink X3 WebSync Manager는 **수집 → (선택) 번역/요약 → EPUB 빌드 → 다중 기기 무선 전송** 파이프라인을 `websync/` 패키지로 분리한 데스크톱 도구입니다.
+본 감사 보고서는 **Xteink X3 WebSync Manager** 프로젝트의 기능 구현 상태, 비동기 동시성 제어, 스크래퍼 예외 처리, 설정 및 파일 처리 등 다각도의 코드 품질과 잠재적 위험 요소를 감사한 결과입니다.
 
-| 항목 | 평가 |
-|------|------|
-| **전체 위험도** | **Low–Medium** (2026-07-13 수정 후) |
-| **아키텍처·모듈 분리** | 양호 |
-| **§3 High-Risk 이슈** | ✅ 권장 수정 전면 반영 (부록 C) |
-| **잔여 리스크** | LAN HTTP 평문(의도·문서화), GUI/Translator E2E 테스트 공백, EXE 선택 기능 제외(문서화) |
-| **테스트** | **63건** — paths, process_lock, epub, pipeline, db, opds, uploader 등 |
-
-**한 줄 요약**: 2026-07-13 감사에서 지적한 Critical/High 항목(frozen 경로, 프로세스 락, save_config, IP 키, 부분 재전송 등)을 코드에 반영했고, 문서·테스트를 동기화했습니다.
+- **전체 위험도**: **Medium**
+- **핵심 요약**:
+  1. **동시성 및 비동기 처리 이슈**: GUI 수동 동기화 및 백그라운드 웹 대시보드 API 간의 락 획득 실패 시, 사용자에게 시각적 알림이 미비하고 조용히 실패 처리가 될 가능성이 있습니다.
+  2. **Calibre Watch의 전송 동시성**: 파일 감시로 작동되는 자동 업로드 기능이 서비스 파이프라인의 락(`_process_lock`, `_pipeline_lock`)을 획득하지 않고 별도 스레드에서 즉시 전송을 수행해 기기 측 동시 HTTP 요청 크래시가 발생할 수 있습니다.
+  3. **인코딩 안정성**: 네이버 블로그 스크래퍼와 달리 신규 추가된 네이버 카페/포스트 스크래퍼에서는 `apparent_encoding` 미지정으로 인해 특정 한글 콘텐츠가 깨진 채 EPUB으로 빌드될 위험이 있습니다.
+  4. **테마 CSS 폴백 로깅 미비**: 커스텀 CSS 파일을 불러오지 못했을 때 GUI 상에 실패 알림이 없고 자동 인라인 폴백만 이루어져 디버깅이 어렵습니다.
 
 ---
 
 ## 2. Project Understanding
 
-### 2.1 목적
+**Xteink X3 WebSync Manager**는 e-ink 단말기(CrossPoint 펌웨어 기반)에 다중 사이트 뉴스 및 PC Calibre 서재 도서를 무선 전송해주는 통합 유틸리티입니다.
 
-Xteink X3(CrossPoint) e-ink 리더기에 웹·RSS·블로그·YouTube 등 콘텐츠와 Calibre 도서를 EPUB 등으로 빌드해 Wi-Fi HTTP 업로드하는 GUI/CLI 도구. SQLite `sync_history.db`로 URL·**기기 IP** 단위 증분 동기화.
-
-### 2.2 모듈 구성
-
-| 모듈 | 역할 |
-|------|------|
-| `x3_websync.py` | 진입점 — GUI 단일 인스턴스(Windows mutex + 락 파일), `--sync` |
-| `websync/core/paths.py` | `PROJECT_ROOT` — 개발: 패키지 상위 / **frozen: exe 디렉터리** |
-| `websync/core/process_lock.py` | **크로스 프로세스** 파이프라인 파일 락 |
-| `websync/config/manager.py` | config CRUD, 원자 저장, `ConfigSaveError` |
-| `websync/pipeline/service.py` | 오케스트레이터 — thread + process 락, 미전송 기기만 업로드 |
-| `websync/upload/uploader.py` | 업로드 결과 키 = **IP**, `only_ips` 필터 |
-| `websync/db/history.py` | 기기별 이력, 삭제/조회 fail-closed |
-| `websync/scrapers/*` | 7종 + CSS `fetch_detail_page`, skip 통계 |
-| `websync/servers/*` | OPDS URL 인코딩, 웹 세션 만료·`compare_digest` |
-| `websync/gui/app.py` | Tkinter UI, `_safe_save_config` |
-
-### 2.3 주요 실행 흐름
-
-```
-main()
-  ├── [GUI] acquire_instance_lock (mutex+file) → SyncAppGui
-  └── [--sync] SyncService.run_sync_pipeline()
-                 ├── _pipeline_lock (thread)
-                 ├── ProcessFileLock (cross-process)
-                 └── _run_sync_pipeline_locked
-                      → fetch → needs_sync → build
-                      → upload_to_targets(only_ips=pending)
-                      → mark_synced(device_ip=ip)
-```
+### 🏗️ 주요 아키텍처 및 흐름
+- **동기화 엔진 (`SyncService`)**: `ScraperFactory`를 통한 다중 채널 크롤링, AI 요약(`Summarizer`), 번역(`Translator`)을 수행하고 `EpubBuilder`로 EPUB 문서를 만듭니다. 중복 전송 방지를 위해 `SyncHistoryDb`를 거쳐 `X3Uploader`가 무선으로 파일을 전송합니다.
+- **GUI 컨트롤러 (`SyncAppGui`)**: Tkinter 기반의 탭형 매니저 툴로서, 역할별로 나뉜 4개의 탭(`SyncTab`, `CalibreTab`, `HistoryTab`, `SettingsTab`)과 하단 바(`BottomBar`)로 구성되어 비동기 스레드(`threading.Thread`)를 통해 백그라운드 작업을 실행합니다.
 
 ---
 
-## 3. High-Risk Issues (감사 시점 → 조치 상태)
+## 3. High-Risk Issues
 
-### 3.1 PyInstaller frozen `PROJECT_ROOT` — ✅ 수정됨
+### 🔴 Calibre Watch 자동 전송 시 파이프라인 락 우회
+* **위치**: `websync/gui/tab_settings.py` / `SettingsTab._toggle_watch` 안의 `on_new_file` 및 `upload_task` 스레드
+* **문제**: 감시 폴더 내에 새 파일이 감지되어 `on_new_file` 콜백이 호출될 때, 파이프라인의 메인 락인 `_pipeline_lock`이나 `_process_lock`을 확인하거나 획득하지 않고 즉시 별도 스레드를 생성하여 업로드(`upload_to_targets`)를 실행합니다.
+* **영향**: 메인 뉴스 동기화 작업이 실행 중이거나 Calibre 서재 탭에서 대량의 도서 전송을 수행하는 도중에 감시 기능이 트리거되면, 단말기(X3)의 경량 웹 서버로 다중 업로드 HTTP 요청이 동시에 가해집니다. 이로 인해 전송이 실패하거나 단말기가 크래시될 수 있습니다.
+* **근거**: 
+  ```python
+  # websync/gui/tab_settings.py
+  def on_new_file(fpath: str):
+      self.app._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 자동 전송 시작")
+      def upload_task():
+          results = self.app._make_uploader().upload_to_targets(fpath)
+          # ...
+      threading.Thread(target=upload_task, daemon=True).start()
+  ```
+  `upload_task` 내부에서 락을 점유하거나 대기하는 안전장치가 존재하지 않습니다.
+* **권장 수정 방향**: `upload_task` 시작 전에 `self.service.is_pipeline_running()`을 체크하여 바쁠 경우 대기열(Queue)에 넣거나, `_pipeline_lock` 획득을 시도하도록 동기화 처리를 추가해야 합니다.
+* **우선순위**: **High**
 
-* **위치**: `websync/core/paths.py` — `_detect_project_root()`
-* **조치**: `sys.frozen` 시 `dirname(sys.executable)`. README에 EXE 데이터 경로 명시.
-* **우선순위(잔여)**: Low — EXE 스모크는 CI 미포함 **(추정)**
+### 🟡 네이버 카페 및 포스트 스크래퍼의 인코딩 문제
+* **위치**: `websync/scrapers/naver_cafe.py` (`_fetch_article_content`), `websync/scrapers/naver_post.py` (`_fetch_post_content`)
+* **문제**: HTML 텍스트를 읽어 파싱할 때 `requests.get` 결과물에서 `resp.encoding`을 검증하거나 `apparent_encoding`으로 대입하지 않고 즉시 `resp.text`를 파싱합니다.
+* **영향**: 대상 네이버 카페 또는 포스트 본문의 인코딩 사양이 UTF-8이 아닌 특정 EUC-KR 등의 변종 헤더로 전달될 경우, 한글이 깨진 깨진 문자가 수집되고 결국 깨진 EPUB 파일이 생성될 수 있습니다.
+* **근거**: 
+  ```python
+  # websync/scrapers/naver_cafe.py
+  resp = requests.get(content_url, headers=HEADERS, timeout=15)
+  resp.raise_for_status()
+  soup = BeautifulSoup(resp.text, "html.parser") # apparent_encoding 처리 누락
+  ```
+  기존 `naver.py`(블로그 스크래퍼)에서는 이 문제를 방지하기 위해 다음과 같이 구현되어 있습니다:
+  ```python
+  post_response.encoding = post_response.apparent_encoding
+  post_soup = BeautifulSoup(post_response.text, "html.parser")
+  ```
+* **권장 수정 방향**: `naver_cafe.py`와 `naver_post.py`에서 개별 본문 및 목록을 패치할 때 `resp.encoding = resp.apparent_encoding` 구문을 파싱 전에 호출하도록 수정합니다.
+* **우선순위**: **Medium**
 
-### 3.2 프로세스 간 파이프라인 동시 실행 — ✅ 수정됨
+### 🟡 커스텀 CSS 테마 경로 획득 실패 시 피드백 미비
+* **위치**: `websync/epub/builder.py` / `EpubBuilder._load_theme_css`
+* **문제**: 사용자가 지정한 `custom.css` 파일 경로에서 파일을 읽어오는 중 예외(파일 없음, 권한 오류 등)가 발생하면 그냥 조용히 `pass`하고 넘어가 결국 기본 인라인 CSS로 빌드됩니다.
+* **영향**: 사용자는 GUI에서 커스텀 CSS 테마를 올바르게 지정했다고 생각하지만 실제로는 적용되지 않으며, 왜 적용되지 않는지 원인을 전혀 파악할 수 없습니다.
+* **근거**:
+  ```python
+  # websync/epub/builder.py
+  if self.epub_theme == "custom" and self.epub_custom_css:
+      try:
+          with open(self.epub_custom_css, "r", encoding="utf-8") as f:
+              css_text = f.read()
+      except Exception:
+          pass # 예외 발생 시 에러 로깅이나 사용자 피드백이 누락됨
+  ```
+* **권장 수정 방향**: `except Exception as e:` 블록에서 로거를 통해 warning 로그를 작성하도록 변경하고, GUI에서도 오류 상태를 로그 텍스트창에 노출할 수 있는 구조를 마련해야 합니다.
+* **우선순위**: **Medium**
 
-* **위치**: `websync/core/process_lock.py`, `SyncService.run_sync_pipeline`
-* **조치**: thread lock + `ProcessFileLock` 비차단 획득. 다른 프로세스 점유 시 False 반환.
-
-### 3.3 부분 재시도 시 성공 기기 재전송 — ✅ 수정됨
-
-* **위치**: `service.py` — `pending_ips` + `upload_to_targets(..., only_ips=)`
-* **조치**: 배치 내 미전송 기기만 업로드. 테스트 `test_pipeline_skips_already_synced_device_on_retry`.
-
-### 3.4 `save_config` silent 실패 — ✅ 수정됨
-
-* **위치**: `ConfigSaveError`, GUI `_safe_save_config`
-* **조치**: 저장 실패 시 예외 전파 및 메시지 박스.
-
-### 3.5 기기 이름 키 충돌 — ✅ 수정됨
-
-* **위치**: `uploader.upload_to_targets` → `{ip: bool}`; GUI 이름/IP 중복 검사
-
-### 3.6 웹/OPDS LAN 보안 — ✅ 부분 개선
-
-* **조치**: `secrets.compare_digest`, 세션 7일 만료·`Max-Age`, OPDS 헤더 우선. TLS는 미도입(의도적, README 경고 유지).
-* **잔여**: 비신뢰 LAN에서 HTTP 스니핑 가능 → 문서 고지.
-
-### 3.7 EXE 선택 기능 제외 — ✅ 문서화
-
-* **조치**: README 표로 Pillow/youtube/watchdog/googletrans 제외 명시.
-
-### 3.8 Calibre UI 스레드 로드 — ✅ 수정됨
-
-* **조치**: 워커에서 `list_books()` 후 `after`로 UI 갱신.
-
-### 3.9 Windows GUI 인스턴스 락 — ✅ 강화
-
-* **조치**: named mutex `Local\\XteinkX3WebSync_GUI_SingleInstance` + 락 파일.
-
-### 3.10 OPDS 한글 파일명 — ✅ 수정됨
-
-* **조치**: `quote`/`unquote`, RFC 5987 `filename*`.
-
-### 3.11 이력 삭제 silent — ✅ 수정됨
-
-* **조치**: `SyncHistoryDbError` + GUI 오류 처리.
-
-### 3.12 스크래퍼 포스트 단위 silent — ✅ 개선
-
-* **조치**: `last_fetch_stats`, 전량 실패 시 예외, 파이프라인 스킵 건수 로그.
-
----
-
-## 4. Potential Functional Gaps (잔여)
-
-| 구분 | 내용 |
-|------|------|
-| **LAN HTTP** | 웹 대시보드·OPDS LAN은 평문 — reverse proxy TLS 권장 |
-| **GUI/Translator 테스트** | 단위 테스트 없음 (수동·E2E 공백) |
-| **CSS 상세 페이지** | `fetch_detail_page` 옵션 추가됨 — 사이트별 셀렉터 튜닝 필요 |
-| **스케줄 desync** | `config.schedule.enabled`와 OS 작업 등록 수동 불일치 가능 |
-| **Watch on_moved** | 이동으로 들어온 파일 미감지 **(추정)** |
+### 🟢 LAN 공개 시 윈도우 방화벽 예외 문제
+* **위치**: `websync/gui/tab_settings.py` / `SettingsTab` 내 OPDS 및 웹 서버 실행 영역
+* **문제**: 사용자가 LAN 공개(0.0.0.0 바인딩) 옵션을 활성화하더라도 Windows 방화벽이 해당 포트(8765, 8766)의 외부 연결을 허용하지 않으면 단말기가 서버에 접속할 수 없습니다.
+* **영향**: 사용자가 설정을 켰으나 전송 실패 등이 지속되어 네트워크 문제로 오인할 가능성이 있습니다.
+* **근거**: 현재 서버 실행 코드 및 토글 메서드에서 OS 레벨의 방화벽 상태 안내나 포트 열기 가이드가 GUI 및 로그에 언급되지 않습니다.
+* **권장 수정 방향**: LAN 공개 옵션을 활성화하고 서버를 구동할 때, 윈도우 환경인 경우 방화벽 예외 처리가 필요할 수 있다는 힌트성 문구(ToolTip 또는 HintLabel)를 SettingsTab UI에 배치합니다.
+* **우선순위**: **Low**
 
 ---
 
-## 5. Recommended Fix Plan — 완료 현황
+## 4. Potential Functional Gaps
 
-### 1단계 ✅
-1. frozen `PROJECT_ROOT`  
-2. 크로스 프로세스 파이프라인 락  
-3. `save_config` 실패 전파  
-4. 업로드/이력 IP 키 통일  
+### 1. 선택적 동기화 실행 중 메인 락 제어 관련 알림 부족 (추정)
+- **내용**: 프리뷰 대화상자에서 "선택 기사 기기로 전송"을 실행할 때, 이미 전체 동기화가 백그라운드(스케줄러 또는 웹 대시보드 API)에서 가동 중이라면 `sync_selected_articles` 메서드는 락 획득 실패로 조용히 `False`를 리턴합니다.
+- **보완 제안**: 락을 획득하지 못해 중단되었을 경우 사용자에게 "현재 다른 동기화 작업이 실행 중입니다. 잠시 후 다시 시도해주세요."라는 메시지 박스를 띄워 인지시키는 흐름이 필요합니다.
 
-### 2단계 ✅
-5. 미전송 기기만 재업로드  
-6. Calibre 워커 스레드  
-7. OPDS 파일명 인코딩  
-8. history fail-closed  
-9. 스크래퍼 skip 통계·전량 실패 예외  
-10. README EXE 제외 기능  
+### 2. 네이버 포스트 스크래퍼의 비공개/유료 포스트 필터링 누락 (추정)
+- **내용**: `naver_post.py`에서 링크들을 수집하여 루프를 돌 때, 멤버 전용 혹은 유료 포스트 등으로 인해 비로그인 세션에서 접근 불가능한 글을 수집 시도할 경우 `_fetch_post_content`가 `None`을 반환하고 건너뜁니다.
+- **보완 제안**: 스킵된 포스트 수에 대해 skipped 통계를 합산하고 로그에 명확히 표시하여, 사용자가 왜 몇몇 글이 빠졌는지 이해할 수 있도록 정보를 제공해야 합니다.
 
-### 3단계 ✅ (문서·보안·테스트)
-11. Windows GUI mutex  
-12. compare_digest / 세션 만료  
-13. CLAUDE/README/AUDIT 동기화  
-14. paths·process_lock·epub 테스트  
-15. CSS `fetch_detail_page`  
+---
+
+## 5. Recommended Fix Plan
+
+### 1단계: 즉시 수정 (안정성 및 크래시 방지)
+1. **Calibre Watch 업로드 동기화**:
+   - `SettingsTab._toggle_watch` 내 `upload_task` 스레드 진입 시 `self.service.is_pipeline_running()` 혹은 락을 획득하도록 제어 구조 적용.
+2. **네이버 카페/포스트 스크래퍼 인코딩 보정**:
+   - `naver_cafe.py` 및 `naver_post.py` 본문 요청에 `apparent_encoding` 구문 추가.
+
+### 2단계: 안정성 개선 (UX 피드백)
+1. **테마 CSS 로딩 예외 로깅**:
+   - `builder.py`에서 `custom.css` 로드 실패 예외에 대해 `logger.warning` 및 예외 메시지를 로그 창에 전달.
+2. **락 획득 실패 시 GUI 팝업 알림**:
+   - 프리뷰 및 선택 전송에서 락 획득 실패 시 `messagebox.showwarning`을 띄워 사용자 혼선 방지.
+
+### 3단계: 구조 개선
+1. **네트워크 가이드 추가**:
+   - GUI 탭4의 LAN 공개 옵션 근처에 방화벽 예외 등록 안내 추가.
 
 ---
 
 ## 6. Test Recommendations
 
-| 상태 | 내용 |
-|------|------|
-| ✅ | frozen 경로 단위 테스트 (`test_paths.py`) |
-| ✅ | process lock (`test_process_lock.py`) |
-| ✅ | only_ips / partial re-upload (`test_service.py`, `test_uploader.py`) |
-| ✅ | ConfigSaveError (`test_config_manager.py`) |
-| ✅ | EpubBuilder (`test_epub_builder.py`) |
-| ✅ | OPDS 유니코드 다운로드 (`test_opds.py`) |
-| 잔여 | GUI smoke, Translator, frozen EXE 통합 스모크, Calibre mock |
+### 1. Calibre Watch 동시성 테스트 케이스 작성
+- `watchdog` 이벤트가 뉴스 동기화 파이프라인 동작 도중에 동시에 발생할 때, 락을 대기하거나 거절하는 흐름이 테스트 단에서 예외 없이 제어되는지 모의(Mocking) 테스트 추가.
 
-```bash
-python -m pytest tests/ -q
-# 2026-07-13: 63 passed
-```
-
----
-
-## 부록 A. 검증 명령
-
-```bash
-python -m pytest tests/ -q
-```
-
-## 부록 B. 의도적 설계
-
-- OPDS localhost 무인증 편의  
-- AI/번역 옵트인 + config 평문 키  
-- EXE 경량화를 위한 optional 패키지 excludes  
-
-## 부록 C. 2026-07-13 구현 체크리스트
-
-| 이슈 | 상태 |
-|------|------|
-| frozen PROJECT_ROOT | ✅ |
-| ProcessFileLock | ✅ |
-| ConfigSaveError / GUI | ✅ |
-| upload IP keys + only_ips | ✅ |
-| pending device re-upload | ✅ |
-| Calibre worker | ✅ |
-| OPDS quote + filename* | ✅ |
-| DB delete fail-closed | ✅ |
-| scraper stats / all-fail raise | ✅ |
-| CSS fetch_detail_page | ✅ |
-| Windows GUI mutex | ✅ |
-| web session expiry + compare_digest | ✅ |
-| docs + tests (63) | ✅ |
+### 2. 비정상 인코딩 본문 수집에 대한 통합 테스트
+- `naver_cafe.py` 와 `naver_post.py`를 테스트할 때 EUC-KR 및 UTF-8 외의 인코딩 웹 응답 모의 데이터를 넘겨주었을 때도 파싱 결과 깨짐 현상이 없는지 검증하는 테스트 구축.
