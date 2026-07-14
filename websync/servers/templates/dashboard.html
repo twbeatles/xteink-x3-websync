@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X3 WebSync 대시보드</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 24px; }
+  h1 { color: #89b4fa; font-size: 1.6rem; margin-bottom: 20px; }
+  .card { background: #313244; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { color: #89b4fa; font-size: 1rem; margin-bottom: 12px; }
+  button { background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; padding: 10px 22px; font-size: 0.95rem; cursor: pointer; font-weight: bold; margin-right:8px; }
+  button:hover { background: #b4d0fb; }
+  #log-area { background: #181825; border-radius: 8px; padding: 14px; font-family: Consolas, monospace; font-size: 0.82rem; height: 220px; overflow-y: auto; white-space: pre-wrap; color: #a6e3a1; margin-top: 10px; }
+  #sync-result, #status-area { margin-top: 12px; color: #a6e3a1; min-height: 24px; font-size:0.9rem; }
+</style>
+</head>
+<body>
+<h1>🚀 X3 WebSync 대시보드</h1>
+<div class="card">
+  <h2>동기화 제어</h2>
+  <button onclick="runSync()">🚀 즉시 동기화 실행</button>
+  <button onclick="refreshStatus()">📊 상태 새로고침</button>
+  <div id="sync-result"></div>
+  <div id="status-area"></div>
+</div>
+<div class="card">
+  <h2>실행 로그</h2>
+  <button onclick="refreshLog()">🔄 로그 새로고침</button>
+  <div id="log-area">로그를 로드하는 중...</div>
+</div>
+<script>
+async function apiFetch(url, opts={}) {
+  const r = await fetch(url, {credentials: 'same-origin', ...opts});
+  if (r.status === 401) { window.location.href = '/'; return null; }
+  return r;
+}
+async function runSync() {
+  document.getElementById('sync-result').textContent = '⏳ 동기화 실행 중...';
+  const r = await apiFetch('/api/sync', {method: 'POST'});
+  if (!r) return;
+  const d = await r.json();
+  document.getElementById('sync-result').textContent = d.message || d.error || '완료';
+  refreshStatus();
+}
+async function refreshStatus() {
+  const r = await apiFetch('/api/status');
+  if (!r) return;
+  const d = await r.json();
+  document.getElementById('status-area').textContent = JSON.stringify(d, null, 2);
+}
+async function refreshLog() {
+  const r = await apiFetch('/api/log');
+  if (!r) return;
+  const d = await r.json();
+  document.getElementById('log-area').textContent = d.log || '(로그 없음)';
+  document.getElementById('log-area').scrollTop = document.getElementById('log-area').scrollHeight;
+}
+refreshLog();
+refreshStatus();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

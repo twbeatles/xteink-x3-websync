@@ -9,28 +9,35 @@ Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 
 ## 주요 기능 ✨
 
 1. **다중 사이트 뉴스 수집 및 EPUB 빌드**
-   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`
+   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe` (카페), `naver_post` (포스트)
    - 사이트별 이미지 포함/제거, 번역, AI 요약(선택) 지원
    - SQLite 이력 DB로 증분 동기화 (중복 전송 방지)
    - e-ink 최적화 한국어 EPUB 생성 (표지 자동 생성 옵션)
+   - **EPUB 병합 방식 설정** (M4): 사이트별 개별 EPUB 발행 또는 하루치의 모든 기사를 한 권으로 합치는 **일간 합본(Daily Digest)** 발행 모드 지원
+   - **EPUB CSS 테마 커스텀** (M7): `default`, `serif_classic`, `sans_modern`, `dark_eink` 프리셋 제공 및 `custom.css` 외부 연동 지원
 
-2. **Calibre 서재 무선 연동** — `calibredb.exe`로 도서 목록 조회·다중 선택 전송
+2. **뉴스 프리뷰 및 선택 전송** (H1) — 동기화 버튼 옆에 위치한 뉴스 프리뷰를 통해 신규 기사들을 확인하고, 전송을 원하는 기사만 체크하여 기기로 즉시 전송할 수 있는 선택 동기화 지원
 
-3. **로컬 파일 직접 무선 전송** — EPUB/PDF/MOBI/TXT
+3. **사이트 설정 Import/Export** (M5) — 대량의 뉴스 구독 사이트 리스트를 간편하게 가져오고 내보낼 수 있는 JSON 백업 백포팅 기능 지원
 
-4. **다중 X3 기기 동시 전송** — GUI에서 추가 기기 등록
+4. **Calibre 서재 무선 연동** — `calibredb.exe`로 도서 목록 조회·다중 선택 전송
 
-5. **자동 스케줄러** — Windows `schtasks` / macOS `launchd` / Linux `crontab`
+5. **로컬 파일 직접 무선 전송** — EPUB/PDF/MOBI/TXT
 
-6. **동기화 이력 탭** — 전송 이력 조회·삭제(재전송 허용)
+6. **다중 X3 기기 동시 전송** — GUI에서 추가 기기 등록
 
-7. **OPDS 카탈로그 서버** — 생성 EPUB 브라우징 (기본 localhost)
+7. **자동 스케줄러** — Windows `schtasks` / macOS `launchd` / Linux `crontab`
 
-8. **웹 대시보드** — 브라우저에서 동기화 트리거·로그 확인 (API 토큰 인증)
+8. **동기화 이력 탭** — 전송 이력 조회·삭제(재전송 허용)
 
-9. **Calibre Watch** — 폴더 감시 후 신규 파일 자동 전송
+9. **OPDS 카탈로그 서버** — 생성 EPUB 브라우징 (기본 localhost)
 
-10. **실행 로그** — `logs/sync_YYYY-MM-DD.log` 자동 저장
+10. **웹 대시보드** — 브라우저에서 동기화 트리거·로그 확인 (API 토큰 인증, 템플릿 파일화 완료)
+
+11. **Calibre Watch** — 폴더 감시 후 신규 파일 자동 전송
+
+12. **실행 로그** — `logs/sync_YYYY-MM-DD.log` 자동 저장
+
 
 ---
 
@@ -40,18 +47,18 @@ Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 
 xteink-x3-websync/
 ├── x3_websync.py              # 진입점 (CLI/GUI, 단일 인스턴스 락)
 ├── websync/                   # 메인 패키지 (SOLID 기반 모듈 분리)
-│   ├── core/                  # paths, article, logger
-│   ├── config/                # ConfigManager
+│   ├── core/                  # paths, article, logger, types
+│   ├── config/                # ConfigManager, validator
 │   ├── db/                    # SyncHistoryDb
-│   ├── scrapers/              # 7종 스크래퍼 + factory
-│   ├── epub/                  # EpubBuilder
+│   ├── scrapers/              # 9종 스크래퍼 + factory
+│   ├── epub/                  # EpubBuilder (themes 테마 폴더 포함)
 │   ├── upload/                # X3Uploader (다중 기기)
 │   ├── pipeline/              # SyncService, Summarizer, Translator
 │   ├── integrations/          # CalibreManager, ToastNotifier
 │   ├── scheduler/             # SchedulerManager
-│   ├── servers/               # OPDSServer, WebDashboard
+│   ├── servers/               # OPDSServer, WebDashboard (templates 폴더 포함)
 │   ├── watch/                 # CalibreWatcher
-│   └── gui/                   # SyncAppGui
+│   └── gui/                   # SyncAppGui (widgets, tabs, bottom_bar 분리)
 ├── tests/                     # pytest 단위·통합 테스트
 └── scripts/                   # 마이그레이션·검증 스크립트
 ```
@@ -59,13 +66,14 @@ xteink-x3-websync/
 | 패키지/모듈 | 역할 |
 |-------------|------|
 | `x3_websync.py` | 진입점 — `websync.*` 패키지 로드 |
-| `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅 |
-| `websync.config` | `config.json` CRUD, deep merge |
-| `websync.pipeline` | 동기화 파이프라인 오케스트레이터 |
-| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack + 팩토리 |
-| `websync.epub` | EPUB 빌더 |
+| `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅, TypedDict 정의 |
+| `websync.config` | `config.json` CRUD, 스키마 유효성 검증 |
+| `websync.pipeline` | 동기화 파이프라인 오케스트레이터 (프리뷰, 선택 전송, 합본 파이프라인 제어) |
+| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post + 팩토리 |
+| `websync.epub` | EPUB 빌더 (프리셋 CSS 및 커스텀 테마 빌드 지원) |
 | `websync.upload` | HTTP 업로드 (다중 기기) |
 | `websync.db` | SQLite 동기화 이력 |
+
 | `websync.gui` | Tkinter GUI |
 | `websync.scheduler` | 크로스플랫폼 스케줄러 |
 | `websync.servers` | OPDS·웹 대시보드 |

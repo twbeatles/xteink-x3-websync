@@ -1,5 +1,6 @@
 """X3 WebSync 경량 웹 대시보드 서버"""
 import os
+import sys
 import json
 import hmac
 import hashlib
@@ -9,9 +10,30 @@ import time
 import http.cookies
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Callable
+from websync.core.logger import get_logger
 
+logger = get_logger()
 _session_cookie_name = "x3sync_session"
 _SESSION_MAX_AGE_SEC = 7 * 24 * 3600  # 7일
+
+def _load_template(name: str) -> str:
+    """HTML 템플릿 파일을 읽어옵니다. sys.frozen 및 PyInstaller 대응."""
+    if getattr(sys, "frozen", False):
+        if hasattr(sys, "_MEIPASS"):
+            base_dir = os.path.join(sys._MEIPASS, "websync", "servers", "templates")
+        else:
+            base_dir = os.path.join(os.path.dirname(sys.executable), "servers", "templates")
+    else:
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+    
+    path = os.path.join(base_dir, name)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        logger.error(f"템플릿 로드 실패 ({name}): {e}")
+        return f"Template {name} not found."
+
 
 
 def _session_value(api_token: str, issued_at: int | None = None) -> str:
@@ -44,116 +66,12 @@ def _token_matches(provided: str | None, expected: str) -> bool:
 
 
 def _login_html() -> str:
-    return """<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>X3 WebSync 로그인</title>
-<style>
-  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
-  .card { background:#313244; padding:28px; border-radius:12px; width:min(400px, 90vw); }
-  h1 { color:#89b4fa; font-size:1.2rem; margin-bottom:16px; }
-  input { width:100%; padding:10px; border-radius:8px; border:1px solid #45475a; background:#181825; color:#cdd6f4; margin:8px 0 16px; }
-  button { width:100%; background:#89b4fa; color:#1e1e2e; border:none; border-radius:8px; padding:10px; font-weight:bold; cursor:pointer; }
-  #msg { color:#f38ba8; min-height:20px; font-size:0.9rem; }
-  p { font-size:0.85rem; color:#a6adc8; }
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>🔐 X3 WebSync 대시보드</h1>
-  <p>config.json의 <code>web_dashboard.api_token</code> 값을 입력하세요.</p>
-  <input id="token" type="password" placeholder="API 토큰" autocomplete="current-password">
-  <button onclick="login()">로그인</button>
-  <div id="msg"></div>
-</div>
-<script>
-async function login() {
-  const token = document.getElementById('token').value.trim();
-  if (!token) { document.getElementById('msg').textContent = '토큰을 입력하세요.'; return; }
-  try {
-    const r = await fetch('/api/login', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
-      body: JSON.stringify({token})
-    });
-    const d = await r.json();
-    if (r.ok) { window.location.href = '/dashboard'; }
-    else { document.getElementById('msg').textContent = d.error || '로그인 실패'; }
-  } catch(e) { document.getElementById('msg').textContent = '오류: ' + e; }
-}
-</script>
-</body>
-</html>"""
+    return _load_template("login.html")
 
 
 def _dashboard_html() -> str:
-    return """<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>X3 WebSync 대시보드</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; padding: 24px; }
-  h1 { color: #89b4fa; font-size: 1.6rem; margin-bottom: 20px; }
-  .card { background: #313244; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-  .card h2 { color: #89b4fa; font-size: 1rem; margin-bottom: 12px; }
-  button { background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; padding: 10px 22px; font-size: 0.95rem; cursor: pointer; font-weight: bold; margin-right:8px; }
-  button:hover { background: #b4d0fb; }
-  #log-area { background: #181825; border-radius: 8px; padding: 14px; font-family: Consolas, monospace; font-size: 0.82rem; height: 220px; overflow-y: auto; white-space: pre-wrap; color: #a6e3a1; margin-top: 10px; }
-  #sync-result, #status-area { margin-top: 12px; color: #a6e3a1; min-height: 24px; font-size:0.9rem; }
-</style>
-</head>
-<body>
-<h1>🚀 X3 WebSync 대시보드</h1>
-<div class="card">
-  <h2>동기화 제어</h2>
-  <button onclick="runSync()">🚀 즉시 동기화 실행</button>
-  <button onclick="refreshStatus()">📊 상태 새로고침</button>
-  <div id="sync-result"></div>
-  <div id="status-area"></div>
-</div>
-<div class="card">
-  <h2>실행 로그</h2>
-  <button onclick="refreshLog()">🔄 로그 새로고침</button>
-  <div id="log-area">로그를 로드하는 중...</div>
-</div>
-<script>
-async function apiFetch(url, opts={}) {
-  const r = await fetch(url, {credentials: 'same-origin', ...opts});
-  if (r.status === 401) { window.location.href = '/'; return null; }
-  return r;
-}
-async function runSync() {
-  document.getElementById('sync-result').textContent = '⏳ 동기화 실행 중...';
-  const r = await apiFetch('/api/sync', {method: 'POST'});
-  if (!r) return;
-  const d = await r.json();
-  document.getElementById('sync-result').textContent = d.message || d.error || '완료';
-  refreshStatus();
-}
-async function refreshStatus() {
-  const r = await apiFetch('/api/status');
-  if (!r) return;
-  const d = await r.json();
-  document.getElementById('status-area').textContent = JSON.stringify(d, null, 2);
-}
-async function refreshLog() {
-  const r = await apiFetch('/api/log');
-  if (!r) return;
-  const d = await r.json();
-  document.getElementById('log-area').textContent = d.log || '(로그 없음)';
-  document.getElementById('log-area').scrollTop = document.getElementById('log-area').scrollHeight;
-}
-refreshLog();
-refreshStatus();
-setInterval(refreshStatus, 5000);
-</script>
-</body>
-</html>"""
+    return _load_template("dashboard.html")
+
 
 
 class _DashboardHTTPServer(HTTPServer):
@@ -349,7 +267,7 @@ class WebDashboard:
         if self._running:
             return True
         if not self.api_token:
-            print("❌ 웹 대시보드: API 토큰이 없습니다. config.json을 확인하세요.")
+            logger.error("웹 대시보드: API 토큰이 없습니다. config.json을 확인하세요.")
             return False
         try:
             self._server = _DashboardHTTPServer(
@@ -366,8 +284,9 @@ class WebDashboard:
             self._running = True
             return True
         except Exception as e:
-            print(f"❌ 웹 대시보드 서버 시작 실패: {e}")
+            logger.error(f"웹 대시보드 서버 시작 실패: {e}")
             return False
+
 
     def stop(self):
         if self._server:

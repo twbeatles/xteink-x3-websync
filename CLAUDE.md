@@ -57,7 +57,14 @@ xteink-x3-websync/
 │   ├── watch/
 │   │   └── calibre.py         # Calibre 폴더 감시 (watchdog)
 │   └── gui/
-│       └── app.py             # Tkinter 라이트 테마 GUI (스크롤·PanedWindow)
+│       ├── widgets.py         # 공통 위젯 및 테마 색상 상수
+│       ├── tab_sync.py        # 뉴스 동기화 탭 컴포넌트 (Import/Export, 프리뷰 등)
+│       ├── tab_calibre.py     # Calibre 서재 탭 컴포넌트
+│       ├── tab_history.py     # 동기화 이력 탭 컴포넌트
+│       ├── tab_settings.py    # 설정 탭 컴포넌트 (테마 프리셋 및 병합 설정)
+│       ├── bottom_bar.py      # 하단 진행도 및 로그 바
+│       └── app.py             # 메인 윈도우 조립 및 실행 컨트롤러
+
 │
 ├── config.json                # 사용자 설정 (gitignore)
 ├── sync_history.db            # 전송 이력 DB (gitignore)
@@ -421,8 +428,9 @@ class MyScraper(BaseScraper):
 from websync.scrapers.my_type import MyScraper
 _scrapers["my_type"] = MyScraper()
 
-# 3. websync/gui/app.py — type_cb Combobox values에 "my_type" 추가
-type_cb = ttk.Combobox(frame, values=["css", "rss", "naver", "my_type"], ...)
+# 3. websync/gui/tab_sync.py — type_cb Combobox values에 "my_type" 추가
+type_cb = ttk.Combobox(frame, values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "my_type"], ...)
+
 ```
 
 반환 딕셔너리 형식을 반드시 준수해야 합니다:

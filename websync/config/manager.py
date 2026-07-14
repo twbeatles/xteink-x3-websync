@@ -4,10 +4,15 @@ import secrets
 import shutil
 import threading
 import copy
+import time
+from datetime import datetime
 from websync.core.paths import PROJECT_ROOT, resolve_path
 from websync.config.exceptions import ConfigLoadError, ConfigSaveError
+from websync.config.validator import log_validation_warnings
 
 class ConfigManager:
+
+
     """설정 파일(config.json)의 로드 및 저장을 전담하는 클래스"""
     _lock = threading.Lock()
 
@@ -39,6 +44,9 @@ class ConfigManager:
         "font_size": 16,
         "line_height": 1.7,
         "epub_cover": True,
+        "epub_merge_mode": "per_site",
+        "epub_theme": "default",
+        "epub_custom_css": "",
         "sites": [
             {
                 "name": "예시 블로그 (일반 웹)",
@@ -100,6 +108,7 @@ class ConfigManager:
             "watch_dir": ""
         }
     }
+
 
     def __init__(self, config_path: str | None = None):
         if config_path is None:
@@ -187,7 +196,9 @@ class ConfigManager:
 
                 if updated:
                     self._save_config_unlocked(config)
+                log_validation_warnings(config)
                 return config
+
             except json.JSONDecodeError as e:
                 corrupt_path = f"{self.config_path}.corrupt"
                 try:
@@ -239,3 +250,63 @@ class ConfigManager:
     def get_resolved_output_dir(self, config: dict | None = None) -> str:
         cfg = config or self.load_config()
         return resolve_path(cfg.get("output_dir", "./output"))
+
+    def export_sites(self, file_path: str, site_indices: list[int] | None = None) -> None:
+        """선택된 인덱스의 사이트 설정을 JSON 파일로 내보냅니다."""
+        config = self.load_config()
+        sites = config.get("sites", [])
+        
+        if site_indices is not None:
+            exported_sites = [sites[i] for i in site_indices if 0 <= i < len(sites)]
+        else:
+            exported_sites = sites
+
+        export_data = {
+            "export_version": 1,
+            "exported_at": datetime.now().isoformat() if hasattr(datetime, "now") else str(time.time()),
+            "sites": exported_sites
+        }
+        
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            raise ConfigSaveError(f"사이트 설정 내보내기 실패: {e}") from e
+
+    def import_sites(self, file_path: str) -> list[dict]:
+        """JSON 파일에서 사이트 설정을 읽어와 기존 설정에 중복 없이 임포트한 뒤 추가된 목록을 반환합니다."""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                import_data = json.load(f)
+        except Exception as e:
+            raise ConfigLoadError(f"사이트 설정 파일 읽기 실패: {e}") from e
+
+        if not isinstance(import_data, dict) or "sites" not in import_data:
+            raise ConfigLoadError("올바른 사이트 설정 내보내기 파일 포맷이 아닙니다.")
+
+        imported_sites = import_data.get("sites", [])
+        if not isinstance(imported_sites, list):
+            raise ConfigLoadError("올바른 사이트 설정 내보내기 파일 포맷이 아닙니다.")
+
+        config = self.load_config()
+        current_sites = config.setdefault("sites", [])
+        current_urls = {s.get("url", "").strip().lower() for s in current_sites if s.get("url")}
+
+        added_sites = []
+        for site in imported_sites:
+            if not isinstance(site, dict):
+                continue
+            url = site.get("url", "").strip().lower()
+            if not url or url in current_urls:
+                continue  # URL 중복 및 빈 URL 제외
+            
+            # DEFAULT_SITE와 머지하여 결손 키 보강
+            merged_site, _ = self._deep_merge(self.DEFAULT_SITE, site)
+            current_sites.append(merged_site)
+            added_sites.append(merged_site)
+
+        if added_sites:
+            self.save_config(config)
+
+        return added_sites
+

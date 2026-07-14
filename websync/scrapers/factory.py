@@ -7,6 +7,8 @@ from websync.scrapers.tistory import TistoryScraper
 from websync.scrapers.brunch import BrunchScraper
 from websync.scrapers.youtube import YoutubeScraper
 from websync.scrapers.substack import SubstackScraper
+from websync.scrapers.naver_cafe import NaverCafeScraper
+from websync.scrapers.naver_post import NaverPostScraper
 
 
 class ScraperFactory:
@@ -18,7 +20,10 @@ class ScraperFactory:
         "brunch": BrunchScraper(),
         "youtube": YoutubeScraper(),
         "substack": SubstackScraper(),
+        "naver_cafe": NaverCafeScraper(),
+        "naver_post": NaverPostScraper(),
     }
+
 
     @classmethod
     def get_scraper(cls, scraper_type: str) -> BaseScraper:

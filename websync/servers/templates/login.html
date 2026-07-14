@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X3 WebSync 로그인</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background:#313244; padding:28px; border-radius:12px; width:min(400px, 90vw); }
+  h1 { color:#89b4fa; font-size:1.2rem; margin-bottom:16px; }
+  input { width:100%; padding:10px; border-radius:8px; border:1px solid #45475a; background:#181825; color:#cdd6f4; margin:8px 0 16px; }
+  button { width:100%; background:#89b4fa; color:#1e1e2e; border:none; border-radius:8px; padding:10px; font-weight:bold; cursor:pointer; }
+  #msg { color:#f38ba8; min-height:20px; font-size:0.9rem; }
+  p { font-size:0.85rem; color:#a6adc8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔐 X3 WebSync 대시보드</h1>
+  <p>config.json의 <code>web_dashboard.api_token</code> 값을 입력하세요.</p>
+  <input id="token" type="password" placeholder="API 토큰" autocomplete="current-password">
+  <button onclick="login()">로그인</button>
+  <div id="msg"></div>
+</div>
+<script>
+async function login() {
+  const token = document.getElementById('token').value.trim();
+  if (!token) { document.getElementById('msg').textContent = '토큰을 입력하세요.'; return; }
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+      body: JSON.stringify({token})
+    });
+    const d = await r.json();
+    if (r.ok) { window.location.href = '/dashboard'; }
+    else { document.getElementById('msg').textContent = d.error || '로그인 실패'; }
+  } catch(e) { document.getElementById('msg').textContent = '오류: ' + e; }
+}
+</script>
+</body>
+</html>

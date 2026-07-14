@@ -32,17 +32,24 @@ a = Analysis(
     ['x3_websync.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('websync/servers/templates/*.html', 'websync/servers/templates'),
+        ('websync/epub/themes/*.css', 'websync/epub/themes'),
+    ],
     hiddenimports=[
         'lxml', 'ebooklib', 'bs4', 'requests',
-        'websync', 'websync.core', 'websync.config', 'websync.config.exceptions', 'websync.db',
+        'websync', 'websync.core', 'websync.config', 'websync.config.exceptions', 'websync.config.validator', 'websync.db',
         'websync.scrapers', 'websync.scrapers.css', 'websync.scrapers.rss',
-        'websync.scrapers.naver', 'websync.scrapers.tistory', 'websync.scrapers.brunch',
+        'websync.scrapers.naver', 'websync.scrapers.naver_common', 'websync.scrapers.naver_cafe', 'websync.scrapers.naver_post',
+        'websync.scrapers.tistory', 'websync.scrapers.brunch',
         'websync.scrapers.youtube', 'websync.scrapers.substack',
         'websync.epub', 'websync.upload', 'websync.pipeline',
         'websync.integrations', 'websync.scheduler', 'websync.servers',
         'websync.watch', 'websync.gui',
+        'websync.gui.widgets', 'websync.gui.tab_sync', 'websync.gui.tab_calibre',
+        'websync.gui.tab_history', 'websync.gui.tab_settings', 'websync.gui.bottom_bar',
     ],
+
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -65,8 +72,9 @@ exe = EXE(
     name='x3_websync',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True, # 바이너리 스트립을 통해 용량 최적화
-    upx=True,   # UPX 압축 활성화 (UPX가 시스템에 있는 경우 작동)
+    strip=False, # 바이너리 스트립 비활성화 (Windows 환경)
+    upx=False,   # UPX 압축 비활성화
+
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False, # GUI 모드 구동 (백그라운드 CLI/GUI 시 콘솔창이 뜨지 않음)

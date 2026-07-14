@@ -37,8 +37,9 @@ class _DailyRotatingFileHandler(RotatingFileHandler):
 
 def get_logger() -> logging.Logger:
     global _logger_initialized, _app_logger, _log_handler, _log_date
-    if _logger_initialized:
+    if _logger_initialized and _app_logger is not None:
         return _app_logger
+
 
     log_dir = os.path.join(PROJECT_ROOT, "logs")
     os.makedirs(log_dir, exist_ok=True)

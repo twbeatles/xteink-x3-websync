@@ -1,0 +1,27 @@
+/* X3 WebSync - 다크 e-ink 테마 */
+body {
+    font-family: {{font_family}};
+    font-size: {{font_size}}px;
+    line-height: {{line_height}};
+    margin: 0.8em;
+    color: #1a1a1a;
+    background: #fafafa;
+}
+h1 {
+    font-size: 1.3em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+    padding-bottom: 0.2em;
+    border-bottom: 1px solid #999999;
+}
+p {
+    margin: 0.4em 0;
+    text-align: justify;
+}
+blockquote.ai-summary {
+    background: #eeeeee;
+    border-left: 2px solid #666666;
+    padding: 0.4em 0.8em;
+    margin: 0.4em 0 0.8em 0;
+    font-size: 0.85em;
+}
