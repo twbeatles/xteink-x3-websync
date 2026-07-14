@@ -17,29 +17,28 @@ class BottomBar(ttk.Frame):
         self._build_ui()
 
     def _build_ui(self):
+        # 고 DPI(150% 등)에서 가로 한 줄이 잘리지 않도록 버튼을 세로로 배치
         sync_run_frame = ttk.Frame(self)
         sync_run_frame.pack(fill="x", padx=5, pady=2)
-        sync_run_frame.columnconfigure(0, weight=3)
-        sync_run_frame.columnconfigure(1, weight=1)
 
-        # 🚀 즉시 동기화 버튼
         self.sync_now_btn = ttk.Button(
-            sync_run_frame, 
-            text="🚀 즉시 전체 뉴스 스크래핑 및 X3 동기화 실행", 
-            command=self.app._run_immediate_sync
+            sync_run_frame,
+            text="🚀 즉시 전체 뉴스 스크래핑 및 X3 동기화 실행",
+            command=self.app._run_immediate_sync,
         )
-        self.sync_now_btn.grid(row=0, column=0, sticky="we", pady=3, padx=(0, 2))
+        self.sync_now_btn.pack(fill="x", pady=(2, 1))
 
-        # H1: 프리뷰 버튼 추가
         self.preview_btn = ttk.Button(
-            sync_run_frame, 
-            text="🔍 뉴스 프리뷰 (선택 동기화)", 
-            command=self.app.tab_sync.open_preview_window
+            sync_run_frame,
+            text="🔍 뉴스 프리뷰 (선택 동기화)",
+            command=self.app.tab_sync.open_preview_window,
         )
-        self.preview_btn.grid(row=0, column=1, sticky="we", pady=3, padx=(2, 0))
+        self.preview_btn.pack(fill="x", pady=(1, 2))
 
         # 진행률 표시바
-        self.progress_bar = ttk.Progressbar(self, orient="horizontal", mode="determinate", style="TProgressbar")
+        self.progress_bar = ttk.Progressbar(
+            self, orient="horizontal", mode="determinate", style="TProgressbar"
+        )
         self.progress_bar.pack(fill="x", padx=5, pady=(0, 2))
 
         log_frame = ttk.LabelFrame(self, text=" 프로그램 상태 및 동기화 로그 ")
@@ -48,7 +47,16 @@ class BottomBar(ttk.Frame):
         log_inner = ttk.Frame(log_frame)
         log_inner.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.log_txt = tk.Text(log_inner, height=6, bg=TEXT_BG, fg=FG_COLOR, insertbackground=FG_COLOR, font=("Consolas", 9), wrap="word")
+        # height를 너무 크게 두지 않아 고 DPI에서도 버튼 영역이 우선 확보되게 함
+        self.log_txt = tk.Text(
+            log_inner,
+            height=4,
+            bg=TEXT_BG,
+            fg=FG_COLOR,
+            insertbackground=FG_COLOR,
+            font=("Consolas", 9),
+            wrap="word",
+        )
         self.log_txt.pack(side="left", fill="both", expand=True)
 
         log_scroll = ttk.Scrollbar(log_inner, orient="vertical", command=self.log_txt.yview)

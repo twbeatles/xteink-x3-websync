@@ -45,18 +45,59 @@ class SyncAppGui:
 
         self.root = tk.Tk()
         self.root.title("Xteink X3 WebSync Manager")
-        self.root.geometry("860x760")
-        self.root.minsize(640, 480)
+        # 고 DPI(125%/150%/200%)에서도 하단 동기화 바가 잘리지 않도록
+        # 화면 비율 기반으로 초기 크기를 잡고, 최소 높이를 충분히 확보한다.
+        init_w, init_h = self._preferred_window_size()
+        self.root.geometry(f"{init_w}x{init_h}")
+        self.root.minsize(720, 620)
         self.root.resizable(True, True)
 
         self._sync_busy = False
+        self._bottom_pane_adjusted = False
 
         self._setup_styles()
         self._build_ui()
         self._load_config_to_ui()
-        
-        self.root.after(0, lambda: center_window(self.root, 860, 760))
+
+        self.root.after(0, lambda w=init_w, h=init_h: self._finalize_layout(w, h))
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _preferred_window_size(self) -> tuple[int, int]:
+        """디스플레이 배율/해상도에 맞는 초기 창 크기."""
+        try:
+            sw = int(self.root.winfo_screenwidth())
+            sh = int(self.root.winfo_screenheight())
+        except Exception:
+            return 920, 820
+        # 150% 배율 노트북에서도 하단 버튼+로그가 보이도록 여유 확보
+        width = max(860, min(1100, int(sw * 0.58)))
+        height = max(760, min(980, int(sh * 0.82)))
+        return width, height
+
+    def _finalize_layout(self, width: int, height: int) -> None:
+        """창 배치 후 하단 패널 최소 높이를 보장한다."""
+        center_window(self.root, width, height)
+        self.root.update_idletasks()
+        self._ensure_bottom_pane_visible()
+
+    def _ensure_bottom_pane_visible(self) -> None:
+        """세로 분할창에서 즉시 동기화 버튼이 가려지지 않도록 sash 위치를 1회 조정."""
+        if self._bottom_pane_adjusted:
+            return
+        try:
+            self.root.update_idletasks()
+            total_h = int(self.main_paned.winfo_height())
+            if total_h <= 1:
+                self.root.after(50, self._ensure_bottom_pane_visible)
+                return
+            # 버튼 2줄 + 진행바 + 로그 영역 최소 확보 (고 DPI 여유 포함)
+            min_bottom = 220
+            target_bottom = max(min_bottom, int(total_h * 0.30))
+            sash_y = max(180, total_h - target_bottom)
+            self.main_paned.sashpos(0, sash_y)
+            self._bottom_pane_adjusted = True
+        except Exception:
+            pass
 
     def _setup_styles(self):
         self.style = ttk.Style()
@@ -115,10 +156,19 @@ class SyncAppGui:
         self.notebook.add(self.tab_history, text=" 📋 동기화 이력 ")
         self.notebook.add(self.tab_settings, text=" ⚙️ 고급 & 서버 설정 ")
 
-        # 하단 바
+        # 하단 바 (즉시 동기화 / 프리뷰 / 로그)
         bottom_container = ttk.Frame(self.main_paned)
         self.main_paned.add(bottom_container, weight=1)
+        # weight만으로는 고 DPI에서 하단이 거의 사라질 수 있어 minsize 지정
+        try:
+            self.main_paned.paneconfigure(bottom_container, minsize=200, weight=1)
+            self.main_paned.paneconfigure(tab_container, minsize=240, weight=3)
+        except tk.TclError:
+            pass
+
         self.bottom_bar = BottomBar(bottom_container, self)
+        # pack 누락 시 동기화 버튼·로그 전체가 아예 안 보임
+        self.bottom_bar.pack(fill="both", expand=True)
 
     def _bind_autosave(self, widget: tk.Misc) -> None:
         widget.bind("<FocusOut>", lambda _e: self._save_ui_settings())
@@ -288,7 +338,8 @@ class SyncAppGui:
         config = self.service.config
         
         # 1. SyncTab에서 정보 가져옴
-        config["x3_ip"] = self.tab_sync.ip_entry.get().strip()
+        from websync.upload.uploader import normalize_device_host
+        config["x3_ip"] = normalize_device_host(self.tab_sync.ip_entry.get())
         config["output_dir"] = self.tab_sync.dir_entry.get().strip()
         config["font_family"] = self.tab_sync.font_cb.get()
         config["epub_cover"] = self.tab_sync.cover_var.get()

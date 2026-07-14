@@ -224,7 +224,12 @@ class SyncService:
                     upload_results = self.uploader.upload_to_targets(epub_path, only_ips=pending_ips)
                     for ip, ok in upload_results.items():
                         status = "✅" if ok else "❌"
-                        log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송")
+                        detail = ""
+                        if not ok:
+                            err = getattr(self.uploader, "last_errors", {}).get(ip)
+                            if err:
+                                detail = f" — {err}"
+                        log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송{detail}")
 
                     any_ok = bool(upload_results) and any(upload_results.values())
                     all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
@@ -289,7 +294,12 @@ class SyncService:
                     upload_results = self.uploader.upload_to_targets(epub_path, only_ips=pending_ips)
                     for ip, ok in upload_results.items():
                         status = "✅" if ok else "❌"
-                        log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송")
+                        detail = ""
+                        if not ok:
+                            err = getattr(self.uploader, "last_errors", {}).get(ip)
+                            if err:
+                                detail = f" — {err}"
+                        log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송{detail}")
 
                     any_ok = bool(upload_results) and any(upload_results.values())
                     all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)

@@ -2,7 +2,15 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from websync.upload.uploader import X3Uploader
+from websync.upload.uploader import X3Uploader, normalize_device_host
+
+
+def test_normalize_device_host_strips_slash_and_scheme():
+    assert normalize_device_host("192.168.31.54/") == "192.168.31.54"
+    assert normalize_device_host("http://192.168.31.54/") == "192.168.31.54"
+    assert normalize_device_host("https://crosspoint.local/path") == "crosspoint.local"
+    assert normalize_device_host("  10.0.0.1  ") == "10.0.0.1"
+    assert normalize_device_host("") == ""
 
 
 def test_sanitize_filename_korean():
@@ -13,11 +21,18 @@ def test_sanitize_filename_korean():
 
 
 def test_build_target_list_dedup():
-    u = X3Uploader("192.168.1.10", devices=[{"name": "추가", "ip": "192.168.1.20"}, {"name": "dup", "ip": "192.168.1.10"}])
+    u = X3Uploader(
+        "192.168.1.10/",
+        devices=[
+            {"name": "추가", "ip": "http://192.168.1.20/"},
+            {"name": "dup", "ip": "192.168.1.10"},
+        ],
+    )
     targets = u._build_target_list()
     ips = [t["ip"] for t in targets]
     assert ips.count("192.168.1.10") == 1
     assert "192.168.1.20" in ips
+    assert all(not ip.endswith("/") for ip in ips)
 
 
 def test_calc_timeout_scales_with_size():

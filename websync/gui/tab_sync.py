@@ -326,18 +326,20 @@ class SyncTab(ttk.Frame):
         ip_entry.grid(row=1, column=1, pady=6)
 
         def save():
+            from websync.upload.uploader import normalize_device_host
+
             name = name_entry.get().strip()
-            ip = ip_entry.get().strip()
+            ip = normalize_device_host(ip_entry.get())
             if not name or not ip:
                 messagebox.showerror("오류", "이름과 IP를 모두 입력해 주세요.", parent=dialog)
                 return
             config = self.service.config
             devices = config.setdefault("x3_devices", [])
-            primary = (config.get("x3_ip") or "").strip()
+            primary = normalize_device_host(config.get("x3_ip") or "")
             if ip == primary:
                 messagebox.showwarning("중복", "기본 기기 IP와 동일합니다.", parent=dialog)
                 return
-            if any(d.get("ip") == ip for d in devices):
+            if any(normalize_device_host(d.get("ip")) == ip for d in devices):
                 messagebox.showwarning("중복", "이미 등록된 IP입니다.", parent=dialog)
                 return
             if name == "기본 기기" or any(d.get("name") == name for d in devices):
