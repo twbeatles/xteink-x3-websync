@@ -173,6 +173,7 @@ class EpubBuilder:
         book = epub.EpubBook()
         book.set_title(f"{site_name} ({today_str})")
         book.set_language("ko")
+        book.set_identifier(f"x3-websync-{safe_site_name}-{today_str}")
 
         if generate_cover:
             cover_bytes = self._make_cover_image(site_name, len(articles), today_str)
@@ -284,22 +285,19 @@ class EpubBuilder:
                 book.add_item(cover_item)
                 book.set_cover("images/cover.jpg", cover_data)
         
-        # CSS
+        # CSS — build()와 동일한 인라인 <style> 방식 (e-ink 호환성 통일)
         theme_css = self._load_theme_css()
         if not theme_css:
             theme_css = self._build_default_css()
-        
-        style = epub.EpubItem(uid="style", file_name="style/default.css", media_type="text/css", content=theme_css.encode("utf-8"))
-        book.add_item(style)
-        
+
         chapters = []
         toc_sections = []
         chapter_num = 0
-        
+
         for site_name, articles in articles_by_site.items():
             if not articles:
                 continue
-            
+
             section_chapters = []
             for art in articles:
                 chapter_num += 1
@@ -308,7 +306,7 @@ class EpubBuilder:
                 body_html = self._sanitize_body_html(art.get("content", ""))
                 summary_html = art.get("summary_html", "")
                 summary_block = f'<blockquote class="ai-summary">{summary_html}</blockquote>' if summary_html else ""
-                
+
                 ch = epub.EpubHtml(
                     title=f"[{site_name}] {title}",
                     file_name=f"chapter_{chapter_num:03d}.xhtml",
@@ -320,7 +318,7 @@ class EpubBuilder:
                     '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko">'
                     '<head><meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8"/>'
                     f'<title>{safe_title}</title>'
-                    '<link rel="stylesheet" href="style/default.css" type="text/css"/>'
+                    f'<style>{theme_css}</style>'
                     '</head><body>'
                     f'<p style="font-size:0.8em;color:#888;">&mdash; {site_name}</p>'
                     f'<h1>{safe_title}</h1>'
@@ -328,7 +326,6 @@ class EpubBuilder:
                     f'{body_html}'
                     '</body></html>'
                 ).encode("utf-8")
-                ch.add_item(style)
                 book.add_item(ch)
                 chapters.append(ch)
                 section_chapters.append(ch)

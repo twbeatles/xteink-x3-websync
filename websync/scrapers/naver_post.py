@@ -3,9 +3,8 @@
 URL 형식: https://post.naver.com/my.naver?memberNo={id}
 """
 import re
-import requests
 from bs4 import BeautifulSoup
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, fetch_url
 from websync.scrapers.naver_common import clean_naver_content
 from websync.core.logger import get_logger
 
@@ -24,7 +23,7 @@ class NaverPostScraper(BaseScraper):
         articles = []
         try:
             # 네이버 포스트 작성자 페이지
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -68,7 +67,7 @@ class NaverPostScraper(BaseScraper):
     def _fetch_post_content(self, post_url: str, site_config: dict) -> str | None:
         """개별 포스트 본문 수집"""
         try:
-            resp = requests.get(post_url, headers=HEADERS, timeout=15)
+            resp = fetch_url(post_url, timeout=15)
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")

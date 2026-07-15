@@ -1,7 +1,6 @@
 """RssScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 import re
-import requests
 from bs4 import BeautifulSoup
 
 class RssScraper(BaseScraper):
@@ -10,12 +9,8 @@ class RssScraper(BaseScraper):
         url = site_config.get("url")
         limit = site_config.get("limit", 5)
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = fetch_url(url, timeout=15)
             response.raise_for_status()
         except Exception as e:
             raise Exception(f"RSS XML 다운로드 실패: {e}")

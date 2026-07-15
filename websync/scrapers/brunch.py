@@ -1,6 +1,5 @@
 """BrunchScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
-import requests
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 from bs4 import BeautifulSoup
 from websync.core.logger import get_logger
 
@@ -19,7 +18,7 @@ class BrunchScraper(BaseScraper):
         articles = []
         skipped = 0
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
             # 최신 글 링크 수집
@@ -52,7 +51,7 @@ class BrunchScraper(BaseScraper):
 
     def _fetch_brunch_content(self, url: str, site_config: dict) -> str:
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
             content_tag = (

@@ -1,6 +1,5 @@
 """YoutubeScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
-import requests
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 from bs4 import BeautifulSoup
 
 class YoutubeScraper(BaseScraper):
@@ -17,7 +16,7 @@ class YoutubeScraper(BaseScraper):
         articles = []
         skipped = 0
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml-xml")
             entries = soup.find_all("entry")[:limit]

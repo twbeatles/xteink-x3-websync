@@ -17,7 +17,6 @@ from websync.core.process_lock import ProcessFileLock
 class SyncService:
     """전체 동기화 비즈니스 로직 조율을 전담하는 클래스"""
     _pipeline_lock = threading.Lock()
-    _last_pipeline_result: dict = {}
     _process_lock = ProcessFileLock()
 
     def __init__(self, config_manager: ConfigManager):
@@ -25,6 +24,7 @@ class SyncService:
         self.config = self.config_manager.load_config()
         self.db = SyncHistoryDb()
         self.logger = get_logger()
+        self._last_pipeline_result: dict = {}
         self._apply_config_to_components()
 
     def _apply_config_to_components(self):
@@ -421,14 +421,20 @@ class SyncService:
             log("⚠️ 이미 파이프라인이 구동 중이므로 프리뷰를 실행할 수 없습니다.")
             return []
 
-        self._reload_config()
-        enabled_sites = [s for s in self.config.get("sites", []) if s.get("enabled", True)]
+        # config 스냅샷 사용 — 실행 중 self.config 교체로 인한 stale 참조 방지
+        config = self.config_manager.load_config()
+        enabled_sites = [s for s in config.get("sites", []) if s.get("enabled", True)]
         if not enabled_sites:
             log("⚠️ 활성화된 수집 대상 사이트가 없습니다.")
             return []
 
         total_sites = len(enabled_sites)
-        upload_targets = self.uploader._build_target_list()
+        # uploader도 config 스냅샷 기반으로 재구성
+        uploader = X3Uploader(
+            x3_ip=config.get("x3_ip", "crosspoint.local"),
+            devices=config.get("x3_devices", [])
+        )
+        upload_targets = uploader._build_target_list()
         target_ips = [d["ip"] for d in upload_targets]
         preview_results = []
 
@@ -520,12 +526,28 @@ class SyncService:
             epub_merge_mode = self.config.get("epub_merge_mode", "per_site")
 
             summarizer = Summarizer(self.config)
-            
+            translator = Translator(self.config)
+
+            # site_name → translate_to 매핑 구성 (config sites에서 조회)
+            site_translate_map: dict[str, str] = {}
+            for site_cfg in self.config.get("sites", []):
+                sname = site_cfg.get("name", "")
+                if sname:
+                    site_translate_map[sname] = site_cfg.get("translate_to", "").strip()
+
             # site_name 별로 기사 그룹화
             articles_by_site = {}
             for art in selected_articles:
                 site_name = art.get("site_name", "기타")
                 articles_by_site.setdefault(site_name, []).append(art)
+
+            # 사이트별 번역 적용 (run_sync_pipeline과 일관성 유지)
+            for site_name, arts in articles_by_site.items():
+                translate_to = site_translate_map.get(site_name, "")
+                if translate_to and translator.is_available_for_site(translate_to):
+                    log(f"🌐 [{site_name}] '{translate_to}' 언어로 번역 중...")
+                    for art in arts:
+                        art["content"] = translator.translate_html(art["content"], target_lang=translate_to)
 
             # AI 요약 후처리 적용
             if summarizer.is_available():
@@ -546,10 +568,14 @@ class SyncService:
                     for art in arts:
                         all_urls.append((art["url"], site_name, art.get("title", "")))
 
+                # pending_set 패턴으로 중복 방지 (run_sync_pipeline과 일관성)
                 pending_ips = []
+                pending_set: set[str] = set()
                 for ip in target_ips:
                     if any(not self.db.is_synced_for_device(url, ip) for url, _, _ in all_urls):
-                        pending_ips.append(ip)
+                        if ip not in pending_set:
+                            pending_set.add(ip)
+                            pending_ips.append(ip)
 
                 if pending_ips:
                     epub_path = self.epub_builder.build_digest(articles_by_site, generate_cover=generate_cover)

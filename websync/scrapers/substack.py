@@ -1,6 +1,5 @@
 """SubstackScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
-import requests
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 from bs4 import BeautifulSoup
 
 class SubstackScraper(BaseScraper):
@@ -11,7 +10,7 @@ class SubstackScraper(BaseScraper):
         articles = []
         try:
             rss_url = url if "/feed" in url else url.rstrip("/") + "/feed"
-            resp = requests.get(rss_url, headers=HEADERS, timeout=15)
+            resp = fetch_url(rss_url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml-xml")
             items = soup.find_all("item")[:limit]

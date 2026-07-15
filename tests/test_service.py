@@ -176,3 +176,20 @@ def test_pipeline_all_empty_fetch_returns_false():
             result = svc.run_sync_pipeline()
     assert result is False
     assert svc.get_last_pipeline_result()["status"] == "empty_fetch"
+
+
+def test_last_pipeline_result_is_instance_variable():
+    """_last_pipeline_result가 인스턴스 변수로 각 인스턴스마다 독립되어야 함."""
+    cm1 = MagicMock(spec=ConfigManager)
+    cm1.load_config.return_value = _base_config()
+    cm1.get_resolved_output_dir.return_value = "./output"
+    svc1 = SyncService(cm1)
+    svc1._last_pipeline_result = {"status": "test_instance_1", "success": True}
+
+    cm2 = MagicMock(spec=ConfigManager)
+    cm2.load_config.return_value = _base_config()
+    cm2.get_resolved_output_dir.return_value = "./output"
+    svc2 = SyncService(cm2)
+
+    assert svc2._last_pipeline_result == {} or svc2._last_pipeline_result.get("status") != "test_instance_1"
+    assert svc1._last_pipeline_result["status"] == "test_instance_1"

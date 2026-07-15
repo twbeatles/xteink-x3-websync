@@ -1,6 +1,5 @@
 """TistoryScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
-import requests
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 from bs4 import BeautifulSoup
 from websync.core.logger import get_logger
 
@@ -21,7 +20,7 @@ class TistoryScraper(BaseScraper):
         try:
             # RSS 피드에서 글 목록 수집
             rss_url = url if url.endswith("/rss") else url.rstrip("/") + "/rss"
-            resp = requests.get(rss_url, headers=HEADERS, timeout=15)
+            resp = fetch_url(rss_url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml-xml")
             items = soup.find_all("item")[:limit]
@@ -55,7 +54,7 @@ class TistoryScraper(BaseScraper):
         if not url:
             return ""
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
             content_tag = (

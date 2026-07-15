@@ -141,8 +141,14 @@ class OPDSHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", disp)
         self.send_header("Content-Length", str(os.path.getsize(fpath)))
         self.end_headers()
+        # 청크 단위 전송 (대용량 EPUB 메모리 부족 방지)
+        _CHUNK_SIZE = 64 * 1024  # 64KB
         with open(fpath, "rb") as f:
-            self.wfile.write(f.read())
+            while True:
+                chunk = f.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
 
 
 class OPDSServer:

@@ -4,9 +4,8 @@
 URL 형식: https://cafe.naver.com/{cafe_id}
 """
 import re
-import requests
 from bs4 import BeautifulSoup
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, fetch_url
 from websync.scrapers.naver_common import clean_naver_content
 from websync.core.logger import get_logger
 
@@ -33,7 +32,7 @@ class NaverCafeScraper(BaseScraper):
         try:
             # 모바일 페이지 사용 (더 단순한 구조)
             mobile_url = f"https://m.cafe.naver.com/ca-fe/web/cafes/{cafe_id}/articles?page=1&pageSize={limit}"
-            resp = requests.get(mobile_url, headers={**HEADERS, "Referer": f"https://m.cafe.naver.com/{cafe_id}"}, timeout=15)
+            resp = fetch_url(mobile_url, headers={"Referer": f"https://m.cafe.naver.com/{cafe_id}"}, timeout=15)
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding
 
@@ -81,7 +80,7 @@ class NaverCafeScraper(BaseScraper):
         """개별 카페 게시글 본문 수집"""
         try:
             content_url = f"https://m.cafe.naver.com/ca-fe/web/cafes/{cafe_id}/articles/{article_id}"
-            resp = requests.get(content_url, headers=HEADERS, timeout=15)
+            resp = fetch_url(content_url, timeout=15)
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding
             soup = BeautifulSoup(resp.text, "html.parser")

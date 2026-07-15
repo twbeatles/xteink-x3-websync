@@ -1,5 +1,6 @@
 """뉴스 동기화 탭 컴포넌트"""
 import os
+import sys
 import hashlib
 import threading
 import tkinter as tk
@@ -226,7 +227,7 @@ class SyncTab(ttk.Frame):
         try:
             if os.name == "nt":
                 os.startfile(folder)
-            elif os.sys.platform == "darwin":
+            elif sys.platform == "darwin":
                 import subprocess
                 subprocess.Popen(["open", folder])
             else:

@@ -1,7 +1,6 @@
 """NaverBlogScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, extract_rss_link, ensure_article_url, fetch_url
 import re
-import requests
 from bs4 import BeautifulSoup
 from websync.core.logger import get_logger
 from websync.scrapers.naver_common import clean_naver_content
@@ -35,14 +34,10 @@ class NaverBlogScraper(BaseScraper):
 
         # 네이버 블로그 RSS 피드 URL 구성
         rss_url = f"https://rss.blog.naver.com/{blog_id}.xml"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
 
         try:
             # RSS 조회하여 최신 글 고유 링크 획득
-            response = requests.get(rss_url, headers=headers, timeout=15)
+            response = fetch_url(rss_url, timeout=15)
             response.raise_for_status()
         except Exception as e:
             raise Exception(f"네이버 블로그 RSS 호출 실패: {e}")
@@ -79,7 +74,7 @@ class NaverBlogScraper(BaseScraper):
                 # iframe 우회용 실제 본문 주소 호출
                 post_view_url = f"https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
                 
-                post_response = requests.get(post_view_url, headers=headers, timeout=15)
+                post_response = fetch_url(post_view_url, timeout=15)
                 if post_response.status_code != 200:
                     self.logger.error(f"포스트 본문 획득 실패 (HTTP {post_response.status_code}): {title}")
                     continue

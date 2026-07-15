@@ -1,7 +1,6 @@
 """CssSelectorScraper"""
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, ensure_article_url
+from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, ensure_article_url, fetch_url
 from urllib.parse import urljoin
-import requests
 from bs4 import BeautifulSoup
 
 
@@ -24,7 +23,7 @@ class CssSelectorScraper(BaseScraper):
         headers = dict(HEADERS)
 
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = fetch_url(url, headers=headers, timeout=15)
             response.raise_for_status()
         except Exception as e:
             raise Exception(f"HTTP 접속 실패: {e}") from e
@@ -103,7 +102,7 @@ class CssSelectorScraper(BaseScraper):
         headers: dict,
     ):
         try:
-            resp = requests.get(art_url, headers=headers, timeout=15)
+            resp = fetch_url(art_url, headers=headers, timeout=15)
             resp.raise_for_status()
             if resp.encoding == "ISO-8859-1":
                 resp.encoding = resp.apparent_encoding

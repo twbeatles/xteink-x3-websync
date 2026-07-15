@@ -25,7 +25,9 @@ class ToastNotifier:
             '$obj.BalloonTipTitle = $args[0]; '
             '$obj.BalloonTipText = $args[1]; '
             '$obj.Visible = $True; '
-            '$obj.ShowBalloonTip(5000);'
+            '$obj.ShowBalloonTip(5000); '
+            'Start-Sleep -Seconds 5; '
+            '$obj.Dispose();'
         )
         try:
             subprocess.Popen(
