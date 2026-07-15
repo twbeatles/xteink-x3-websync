@@ -601,6 +601,9 @@ class SyncTab(ttk.Frame):
         try:
             added_sites = self.config_manager.import_sites(file_path)
             if added_sites:
+                # import_sites는 파일에 저장하지만 self.service.config(메모리)는 갱신하지 않으므로
+                # 명시적으로 config를 리로드하여 _refresh_site_tree가 최신 사이트를 반영하도록 함
+                self.service._reload_config()
                 self._refresh_site_tree()
                 names = ", ".join([s.get("name", "") for s in added_sites])
                 messagebox.showinfo("완료", f"새로운 사이트 {len(added_sites)}개가 추가되었습니다:\n{names}")
