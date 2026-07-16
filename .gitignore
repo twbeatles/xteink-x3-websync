@@ -1,6 +1,6 @@
 # X3 WebSync Git Ignore
 
-# Local Config
+# Local Config / secrets
 config.json
 
 # Epub Output
@@ -9,30 +9,52 @@ output/
 # Local DB & Logs
 sync_history.db
 logs/
+*.log
 
-# Python Cache
+# Python Cache / tooling
 **/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
 
 # Virtual Environments
 .venv/
 venv/
 ENV/
+env/
 
 # PyInstaller
 build/
 dist/
 *.spec.bak
 
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
 # OS Files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-
-#mcps
+# Local agent / MCP / indexing (machine-local)
 terminals/
 mcps/
 .codegraph/
 .zcode/
+.grok/
+
+# One-off local refactor helper scripts (optional; keep if committed intentionally)
+# scripts/_refactor_*.py

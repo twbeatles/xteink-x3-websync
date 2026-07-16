@@ -67,7 +67,7 @@ def test_pipeline_all_site_errors_returns_false():
     svc = SyncService(cm)
     with patch.object(ScraperFactory, "get_scraper") as mock_get:
         mock_get.return_value.fetch_articles.side_effect = RuntimeError("network down")
-        with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+        with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
             result = svc.run_sync_pipeline()
     assert result is False
     assert svc.get_last_pipeline_result()["status"] == "errors"
@@ -86,7 +86,7 @@ def test_pipeline_no_new_articles_returns_true():
         mock_get.return_value.fetch_articles.return_value = [
             {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
         ]
-        with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+        with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
             result = svc.run_sync_pipeline()
     assert result is True
     assert svc.get_last_pipeline_result()["status"] == "no_new"
@@ -116,7 +116,7 @@ def test_pipeline_partial_upload_marks_only_successful_devices():
                     "upload_to_targets",
                     return_value={"127.0.0.1": True, "10.0.0.2": False},
                 ) as mock_upload:
-                    with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+                    with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
                         result = svc.run_sync_pipeline()
     assert result is False
     svc.db.mark_synced.assert_called_once()
@@ -154,7 +154,7 @@ def test_pipeline_skips_already_synced_device_on_retry():
                     "upload_to_targets",
                     return_value={"10.0.0.2": True},
                 ) as mock_upload:
-                    with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+                    with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
                         result = svc.run_sync_pipeline()
     assert result is True
     assert mock_upload.call_args.kwargs.get("only_ips") == ["10.0.0.2"]
@@ -172,7 +172,7 @@ def test_pipeline_all_empty_fetch_returns_false():
     svc = SyncService(cm)
     with patch.object(ScraperFactory, "get_scraper") as mock_get:
         mock_get.return_value.fetch_articles.return_value = []
-        with patch("websync.pipeline.service.ToastNotifier.show_toast"):
+        with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
             result = svc.run_sync_pipeline()
     assert result is False
     assert svc.get_last_pipeline_result()["status"] == "empty_fetch"

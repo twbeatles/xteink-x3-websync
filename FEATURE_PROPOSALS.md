@@ -1,7 +1,8 @@
 # 🔬 Xteink X3 WebSync — 프로젝트 심층 분석 및 기능 확장 제안서
 
 > **작성일**: 2026-07-14  
-> **분석 범위**: 전체 소스코드 (~5,039줄, 42개 파일), CLAUDE.md, README.md, PROJECT_AUDIT.md  
+> **갱신**: 2026-07-16 — SOLID 패키지 분리·기기 파일 관리·pytest 107건 반영  
+> **분석 범위**: 전체 소스코드, CLAUDE.md, README.md, PROJECT_AUDIT.md  
 > **목적**: 현재 구현 현황 파악 및 신규 기능 추가 방향 수립
 
 ---
@@ -12,15 +13,19 @@
 
 | 항목 | 평가 | 비고 |
 |------|------|------|
-| **모듈 분리** | ⭐⭐⭐⭐⭐ | SOLID 원칙 준수, 13개 서브패키지 |
+| **모듈 분리** | ⭐⭐⭐⭐⭐ | SOLID SRP — gui/pipeline/upload/epub/servers 패키지 세분화 |
 | **확장성** | ⭐⭐⭐⭐⭐ | ScraperFactory OCP, 설정 자동 보강 |
 | **동시성 안전** | ⭐⭐⭐⭐⭐ | thread lock + process file lock |
 | **에러 처리** | ⭐⭐⭐⭐ | 대부분 완전, 일부 `print()` 잔존 |
-| **테스트** | ⭐⭐⭐⭐ | 63건 통과, GUI/Translator 테스트 공백 |
-| **문서화** | ⭐⭐⭐⭐⭐ | CLAUDE.md, README.md, AUDIT.md 완비 |
+| **테스트** | ⭐⭐⭐⭐ | **107건** 통과 (device_client·uploader·pipeline 등) |
+| **문서화** | ⭐⭐⭐⭐⭐ | CLAUDE.md, README.md, USER_GUIDE.md, AUDIT.md |
 | **보안** | ⭐⭐⭐⭐ | compare_digest, 입력검증, LAN HTTP는 의도적 |
 
-### 1-2. 코드 규모 분석
+### 1-2. 코드 규모 분석 (참고: 2026-07-14 스냅샷)
+
+> 이후 `gui/{app_core,sync_tab,device_files,settings_tab}`, `pipeline/{sync_pipeline,preview,selected_sync}`,  
+> `upload/{host,remote_path,device_client,…}`, `servers/dashboard/`, `epub/{css,cover,sanitize}` 로 분리됨.  
+> 아래 표는 초기 분석 시점의 참고용이며, 최신 구조는 `CLAUDE.md` / `README.md` 를 따른다.
 
 | 모듈 | 파일 수 | 라인 수 | 비중 |
 |------|---------|---------|------|

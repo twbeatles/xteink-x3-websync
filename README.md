@@ -51,14 +51,14 @@ xteink-x3-websync/
 │   ├── config/                # ConfigManager, validator
 │   ├── db/                    # SyncHistoryDb
 │   ├── scrapers/              # 9종 스크래퍼 + factory
-│   ├── epub/                  # EpubBuilder (themes 테마 폴더 포함)
-│   ├── upload/                # X3Uploader (다중 기기)
-│   ├── pipeline/              # SyncService, Summarizer, Translator
+│   ├── epub/                  # builder + css/cover/sanitize + themes/
+│   ├── upload/                # host, remote_path, uploader, device_client
+│   ├── pipeline/              # service 파사드 + sync/preview/selected runners
 │   ├── integrations/          # CalibreManager, ToastNotifier
 │   ├── scheduler/             # SchedulerManager
-│   ├── servers/               # OPDSServer, WebDashboard (templates 폴더 포함)
+│   ├── servers/               # OPDS + dashboard/ 패키지 (templates 포함)
 │   ├── watch/                 # CalibreWatcher
-│   └── gui/                   # SyncAppGui (widgets, tabs, bottom_bar 분리)
+│   └── gui/                   # app_core, sync_tab, device_files, settings_tab …
 ├── tests/                     # pytest 단위·통합 테스트
 └── scripts/                   # 마이그레이션·검증 스크립트
 ```
@@ -68,15 +68,14 @@ xteink-x3-websync/
 | `x3_websync.py` | 진입점 — `websync.*` 패키지 로드 |
 | `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅, TypedDict 정의 |
 | `websync.config` | `config.json` CRUD, 스키마 유효성 검증 |
-| `websync.pipeline` | 동기화 파이프라인 오케스트레이터 (프리뷰, 선택 전송, 합본 파이프라인 제어) |
+| `websync.pipeline` | 동기화 파사드 + 프리뷰/선택 전송/합본 러너 분리 |
 | `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post + 팩토리 |
-| `websync.epub` | EPUB 빌더 (프리셋 CSS 및 커스텀 테마 빌드 지원) |
-| `websync.upload` | HTTP 업로드 (다중 기기) |
+| `websync.epub` | EPUB 빌더 (CSS·표지·정제 모듈 분리) |
+| `websync.upload` | 업로드 + CrossPoint 파일 관리 API 클라이언트 |
 | `websync.db` | SQLite 동기화 이력 |
-
-| `websync.gui` | Tkinter GUI |
+| `websync.gui` | Tkinter GUI (탭·앱 코어 패키지화) |
 | `websync.scheduler` | 크로스플랫폼 스케줄러 |
-| `websync.servers` | OPDS·웹 대시보드 |
+| `websync.servers` | OPDS·웹 대시보드 (`servers/dashboard/`) |
 | `websync.watch` | Calibre 폴더 감시 |
 
 ---
@@ -101,6 +100,7 @@ python x3_websync.py --sync
 ### 기본 설정
 - **X3 주소**: Wi-Fi IP 또는 `crosspoint.local`
 - **추가 기기**: GUI에서 다중 기기 등록 (IP·표시 이름 중복 불가)
+- **기기 파일 관리**: GUI **📁 기기 파일** 탭 — 목록·삭제·폴더 생성·이름 변경·이동·PC 다운로드·현재 폴더 업로드·오래된 동기화 EPUB 정리. 기본 업로드 경로(`device_files.default_upload_path`)는 뉴스/Calibre 전송에도 적용 (기기가 **File Transfer** / Calibre Wireless 모드일 때)
 - **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성, 세션 약 7일)
 - **동기화 이력**: URL·기기(`device_ip`) 단위 — 성공 기기만 이력 기록
 - **부분 재시도**: 다음 동기화 시 **아직 받지 못한 기기만** 재업로드 (이미 성공한 기기는 스킵)

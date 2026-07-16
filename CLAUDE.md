@@ -39,11 +39,22 @@ xteink-x3-websync/
 │   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py
 │   │   └── factory.py         # ScraperFactory (OCP: register_scraper)
 │   ├── epub/
-│   │   └── builder.py         # EPUB 빌더 — e-ink CSS, UTF-8 한국어
+│   │   ├── builder.py         # EPUB 빌더 파사드
+│   │   ├── css.py / cover.py / sanitize.py  # CSS·표지·본문 정제 (SRP)
+│   │   └── themes/            # EPUB CSS 프리셋
 │   ├── upload/
-│   │   └── uploader.py        # 기기 무선 업로드 — 세니타이징, 다중 기기
+│   │   ├── host.py            # 기기 호스트 정규화
+│   │   ├── remote_path.py     # 원격 경로 유틸
+│   │   ├── sync_epub.py       # 동기화 EPUB 날짜 필터
+│   │   ├── errors.py          # DeviceClientError
+│   │   ├── uploader.py        # 무선 업로드
+│   │   └── device_client.py   # CrossPoint 파일 API 클라이언트
 │   ├── pipeline/
-│   │   ├── service.py         # 동기화 파이프라인 오케스트레이터
+│   │   ├── service.py         # SyncService 파사드 (락·설정·위임)
+│   │   ├── sync_pipeline.py   # 전체 사이트 동기화 실행
+│   │   ├── preview.py         # 프리뷰(스크래핑만)
+│   │   ├── selected_sync.py   # 선택 기사 동기화
+│   │   ├── article_keys.py    # 기사 URL 키
 │   │   ├── summarizer.py      # AI 요약
 │   │   └── translator.py      # 번역
 │   ├── integrations/
@@ -53,17 +64,21 @@ xteink-x3-websync/
 │   │   └── manager.py         # schtasks / launchd / crontab
 │   ├── servers/
 │   │   ├── opds.py            # OPDS HTTP 서버
-│   │   └── web_dashboard.py   # 웹 대시보드 (API 토큰 인증)
+│   │   ├── web_dashboard.py   # 하위 호환 re-export → dashboard/
+│   │   └── dashboard/         # session, templates_loader, handler, http_server, service
 │   ├── watch/
 │   │   └── calibre.py         # Calibre 폴더 감시 (watchdog)
 │   └── gui/
 │       ├── widgets.py         # 공통 위젯 및 테마 색상 상수
-│       ├── tab_sync.py        # 뉴스 동기화 탭 컴포넌트 (Import/Export, 프리뷰 등)
-│       ├── tab_calibre.py     # Calibre 서재 탭 컴포넌트
-│       ├── tab_history.py     # 동기화 이력 탭 컴포넌트
-│       ├── tab_settings.py    # 설정 탭 컴포넌트 (테마 프리셋 및 병합 설정)
-│       ├── bottom_bar.py      # 하단 진행도 및 로그 바
-│       └── app.py             # 메인 윈도우 조립 및 실행 컨트롤러
+│       ├── app_core/          # SyncAppGui (layout/helpers/config_sync/sync_control)
+│       ├── sync_tab/          # 뉴스 동기화 탭 (connection/devices/sites/schedule/preview)
+│       ├── device_files/      # 기기 파일 탭 (browser/actions/cleanup/settings)
+│       ├── settings_tab/      # 고급 설정 (epub/servers/watch/ai_translation)
+│       ├── tab_*.py           # 하위 호환 re-export (sync/device_files/settings)
+│       ├── app.py             # 하위 호환 re-export → app_core
+│       ├── tab_calibre.py     # Calibre 서재 탭
+│       ├── tab_history.py     # 동기화 이력 탭
+│       └── bottom_bar.py      # 하단 진행도 및 로그 바
 
 │
 ├── config.json                # 사용자 설정 (gitignore)
@@ -149,7 +164,13 @@ main()
   "translation": {"enabled": false, "provider": "googletrans"},
   "opds_server": {"port": 8765, "allow_lan": false, "api_key": ""},
   "web_dashboard": {"port": 8766, "allow_lan": false, "api_token": ""},
-  "calibre_watch": {"enabled": false, "watch_dir": ""}
+  "calibre_watch": {"enabled": false, "watch_dir": ""},
+  "device_files": {
+    "default_browse_path": "/",
+    "default_upload_path": "/",
+    "cleanup_older_days": 14,
+    "warn_overwrite": true
+  }
 }
 ```
 
@@ -224,8 +245,18 @@ run_sync_pipeline()
 | 파일명 | 영숫자·하이픈·언더바만 허용 (CrossPoint 크래시 방지) |
 | 결과 | `{ip: bool}` — 기기 **IP/호스트**를 키로 사용 |
 | 부분 전송 | `only_ips=[...]` 로 대상 기기 제한 |
+| 대상 폴더 | `remote_dir` / `upload_to_targets(..., remote_dir=)` — `device_files.default_upload_path` |
 | 타임아웃 | `25초 + (파일크기_MB × 5초)` 동적 계산 |
 | 연결 테스트 | `GET /` 3초 타임아웃으로 기기 생존 여부 확인 |
+
+### 3-6b. `websync/upload/device_client.py` — 기기 파일 관리 API
+
+| 항목 | 내용 |
+|------|------|
+| 역할 | CrossPoint File Transfer REST (`/api/files`, `/delete`, `/rename`, `/move`, …) |
+| GUI | `gui/device_files/` — **📁 기기 파일** 탭 |
+| 정리 | 파일명 `YYYY-MM-DD` 기반 오래된 동기화 EPUB 후보 선택·일괄 삭제 |
+| 설정 | `device_files`: `default_browse_path`, `default_upload_path`, `cleanup_older_days`, `warn_overwrite` |
 
 ---
 
@@ -269,14 +300,16 @@ run_sync_pipeline()
 
 ---
 
-### 3-11. `websync/gui/app.py` — GUI
+### 3-11. `websync/gui/` — GUI
 
 | 항목 | 내용 |
 |------|------|
 | 프레임워크 | `tkinter` + `ttk` |
+| 조립 | `app_core/` (`SyncAppGui`), 탭 패키지: `sync_tab/`, `device_files/`, `settings_tab/` |
 | 테마 | Clean Light Theme (`#f8f9fa` 배경, Bootstrap 스타일 포인트 컬러) |
-| 탭 구조 | `뉴스 동기화 및 일반설정` / `Calibre 서재 연동` |
+| 탭 구조 | 뉴스 동기화 / Calibre / 이력 / 기기 파일 / 고급·서버 설정 |
 | 비동기 | `threading.Thread(daemon=True)` + `root.after(0, callback)` 패턴 |
+| 호환 | `gui/app.py`, `tab_sync.py` 등은 re-export 유지 |
 
 ---
 

@@ -106,6 +106,12 @@ class ConfigManager:
         "calibre_watch": {
             "enabled": False,
             "watch_dir": ""
+        },
+        "device_files": {
+            "default_browse_path": "/",
+            "default_upload_path": "/",
+            "cleanup_older_days": 14,
+            "warn_overwrite": True
         }
     }
 

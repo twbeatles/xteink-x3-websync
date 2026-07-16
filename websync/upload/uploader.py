@@ -1,37 +1,32 @@
-import os
-import re
+"""X3 기기 HTTP 업로드."""
+from __future__ import annotations
+
 import mimetypes
-import requests
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+from urllib.parse import quote
 
+import requests
 
-def normalize_device_host(value: str | None) -> str:
-    """기기 주소 정규화: 스킴·경로·끝 슬래시 제거.
+from websync.upload.host import normalize_device_host
+from websync.upload.remote_path import normalize_upload_remote_dir
 
-    예: 'http://192.168.31.54/' → '192.168.31.54'
-    끝 슬래시가 남으면 업로드 URL이 http://IP//upload 가 되어 CrossPoint가 404를 반환한다.
-    """
-    if value is None:
-        return ""
-    host = str(value).strip()
-    if not host:
-        return ""
-    # http(s):// 접두 제거
-    host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE)
-    # 경로/쿼리/프래그먼트 제거 (호스트:포트만 유지)
-    host = host.split("/", 1)[0]
-    host = host.split("?", 1)[0]
-    host = host.split("#", 1)[0]
-    return host.strip().rstrip(".")
+__all__ = ["X3Uploader", "normalize_device_host", "normalize_upload_remote_dir"]
 
 
 class X3Uploader:
     """Xteink X3 기기와의 HTTP 업로드 통신을 전담하는 클래스 (단일/다중 기기 지원)"""
 
-    def __init__(self, x3_ip: str, devices: Optional[list] = None):
+    def __init__(
+        self,
+        x3_ip: str,
+        devices: Optional[list] = None,
+        remote_dir: str | None = None,
+    ):
         self.x3_ip = normalize_device_host(x3_ip)
         self.devices = devices or []
+        self.remote_dir = normalize_upload_remote_dir(remote_dir)
         # 최근 전송 실패 사유 {ip: message} — GUI/파이프라인 로그용
         self.last_errors: dict[str, str] = {}
 
@@ -58,7 +53,14 @@ class X3Uploader:
             file_size_mb = 1.0
         return int(25 + (file_size_mb * 5))
 
-    def _upload_to_ip(self, file_path: str, ip: str, safe_filename: str, timeout: int) -> bool:
+    def _upload_to_ip(
+        self,
+        file_path: str,
+        ip: str,
+        safe_filename: str,
+        timeout: int,
+        remote_dir: str | None = None,
+    ) -> bool:
         """지정 IP의 기기로 파일 1건 전송"""
         host = normalize_device_host(ip)
         if not host:
@@ -67,7 +69,14 @@ class X3Uploader:
             print(f"❌ [{ip}] {msg}")
             return False
 
-        url = f"http://{host}/upload"
+        dest = normalize_upload_remote_dir(
+            remote_dir if remote_dir is not None else self.remote_dir
+        )
+        # path 쿼리: 루트면 생략 (구 펌웨어 호환)
+        if dest and dest != "/":
+            url = f"http://{host}/upload?path={quote(dest, safe='/')}"
+        else:
+            url = f"http://{host}/upload"
         mime = self._guess_mime(file_path)
         try:
             with open(file_path, "rb") as f:
@@ -118,33 +127,37 @@ class X3Uploader:
 
         return targets
 
-    def upload(self, file_path: str) -> bool:
+    def upload(self, file_path: str, remote_dir: str | None = None) -> bool:
         """메인 기기(x3_ip)로 파일 전송"""
         host = normalize_device_host(self.x3_ip)
         if not host:
             return False
         safe_filename = self._sanitize_filename(file_path)
         timeout = self._calc_timeout(file_path)
-        result = self._upload_to_ip(file_path, host, safe_filename, timeout)
+        result = self._upload_to_ip(
+            file_path, host, safe_filename, timeout, remote_dir=remote_dir
+        )
         if not result:
             print("💡 팁: CrossPoint 기기가 켜져 있고 Wi-Fi에 연결되어 있는지 확인해 주세요.")
             print("💡 주소에 끝 슬래시(/)나 http:// 를 넣지 마세요. 예: 192.168.31.54")
         return result
 
-    def upload_to_all_devices(self, file_path: str) -> dict:
+    def upload_to_all_devices(self, file_path: str, remote_dir: str | None = None) -> dict:
         """등록된 모든 기기에 병렬로 파일 전송. 결과를 {ip: bool} 로 반환."""
-        return self.upload_to_targets(file_path)
+        return self.upload_to_targets(file_path, remote_dir=remote_dir)
 
     def upload_to_targets(
         self,
         file_path: str,
         only_ips: Optional[list[str]] = None,
+        remote_dir: str | None = None,
     ) -> dict[str, bool]:
         """
         기본 기기 및 x3_devices에 전송합니다.
         반환: {ip: 성공여부} — 키는 항상 기기 IP/호스트입니다.
 
         only_ips: 지정 시 해당 IP만 전송 (부분 재시도용).
+        remote_dir: 기기 내 대상 폴더 (None이면 self.remote_dir).
         """
         self.last_errors = {}
         all_devices = self._build_target_list()
@@ -159,10 +172,13 @@ class X3Uploader:
         safe_filename = self._sanitize_filename(file_path)
         timeout = self._calc_timeout(file_path)
         results: dict[str, bool] = {}
+        dest = remote_dir
 
         with ThreadPoolExecutor(max_workers=min(len(all_devices), 4)) as executor:
             future_to_device = {
-                executor.submit(self._upload_to_ip, file_path, d["ip"], safe_filename, timeout): d
+                executor.submit(
+                    self._upload_to_ip, file_path, d["ip"], safe_filename, timeout, dest
+                ): d
                 for d in all_devices
             }
             for future in as_completed(future_to_device):

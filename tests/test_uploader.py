@@ -2,7 +2,11 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from websync.upload.uploader import X3Uploader, normalize_device_host
+from websync.upload.uploader import (
+    X3Uploader,
+    normalize_device_host,
+    normalize_upload_remote_dir,
+)
 
 
 def test_normalize_device_host_strips_slash_and_scheme():
@@ -66,7 +70,7 @@ def test_upload_to_targets_partial_failure():
         f.write(b"data")
         path = f.name
     try:
-        def side_effect(file_path, ip, safe_filename, timeout):
+        def side_effect(file_path, ip, safe_filename, timeout, remote_dir=None):
             return ip == "10.0.0.1"
 
         with patch.object(u, "_upload_to_ip", side_effect=side_effect):
@@ -96,3 +100,41 @@ def test_upload_to_targets_no_devices():
     u = X3Uploader("")
     results = u.upload_to_targets("/tmp/x.epub")
     assert results == {}
+
+
+def test_normalize_upload_remote_dir():
+    assert normalize_upload_remote_dir("") == "/"
+    assert normalize_upload_remote_dir("/Books/") == "/Books"
+    assert normalize_upload_remote_dir("Books/Sub") == "/Books/Sub"
+    assert normalize_upload_remote_dir("/a/../b") == "/b"
+
+
+def test_upload_to_ip_includes_remote_path_query():
+    u = X3Uploader("10.0.0.1", remote_dir="/Books")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as f:
+        f.write(b"data")
+        path = f.name
+    try:
+        mock_resp = type("R", (), {"status_code": 200, "text": "ok"})()
+        with patch("websync.upload.uploader.requests.post", return_value=mock_resp) as mpost:
+            assert u._upload_to_ip(path, "10.0.0.1", "book.epub", 30) is True
+        url = mpost.call_args.args[0]
+        assert url.startswith("http://10.0.0.1/upload")
+        assert "path=" in url
+        assert "Books" in url
+    finally:
+        os.remove(path)
+
+
+def test_upload_to_ip_root_no_path_query():
+    u = X3Uploader("10.0.0.1", remote_dir="/")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as f:
+        f.write(b"data")
+        path = f.name
+    try:
+        mock_resp = type("R", (), {"status_code": 200, "text": "ok"})()
+        with patch("websync.upload.uploader.requests.post", return_value=mock_resp) as mpost:
+            u._upload_to_ip(path, "10.0.0.1", "book.epub", 30)
+        assert mpost.call_args.args[0] == "http://10.0.0.1/upload"
+    finally:
+        os.remove(path)
