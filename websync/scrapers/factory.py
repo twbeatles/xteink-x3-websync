@@ -10,6 +10,7 @@ from websync.scrapers.substack import SubstackScraper
 from websync.scrapers.naver_cafe import NaverCafeScraper
 from websync.scrapers.naver_post import NaverPostScraper
 from websync.scrapers.soonsal import SoonsalScraper
+from websync.scrapers.moneyletter import MoneyLetterScraper
 
 
 class ScraperFactory:
@@ -24,6 +25,7 @@ class ScraperFactory:
         "naver_cafe": NaverCafeScraper(),
         "naver_post": NaverPostScraper(),
         "soonsal": SoonsalScraper(),
+        "moneyletter": MoneyLetterScraper(),
     }
 
 

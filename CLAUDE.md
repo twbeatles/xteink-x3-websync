@@ -36,9 +36,7 @@ xteink-x3-websync/
 │   │   └── history.py         # SQLite 동기화 이력 — timeout=10.0
 │   ├── scrapers/
 │   │   ├── base.py            # BaseScraper, 공통 유틸
-│   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py / soonsal.py
-│   │   ├── newsletter_base.py   # 뉴스레터(아카이브) 확장용 베이스 (BaseNewsletterScraper)
-│   │   └── factory.py         # ScraperFactory (OCP: register_scraper)
+│   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py / …
 │   │   └── factory.py         # ScraperFactory (OCP: register_scraper)
 │   ├── epub/
 │   │   ├── builder.py         # EPUB 빌더 파사드
@@ -93,11 +91,10 @@ xteink-x3-websync/
 ├── requirements-optional.txt  # Pillow, googletrans, youtube, watchdog
 ├── .github/workflows/test.yml # CI: pytest
 ├── README.md / CLAUDE.md
-├── docs/                  # 상세 문서 (USER_GUIDE, FEATURE_PROPOSALS, PROJECT_AUDIT, newsletter-*.md 등)
+├── docs/                  # 상세 문서 (USER_GUIDE, FEATURE_PROPOSALS, PROJECT_AUDIT 등)
 │   ├── USER_GUIDE.md
 │   ├── FEATURE_PROPOSALS.md
-│   ├── PROJECT_AUDIT.md
-│   └── newsletter-scraper-extension.md   # 뉴스레터 스크래퍼 확장 가이드 (AI 참조용)
+│   └── PROJECT_AUDIT.md
 ├── pyrightconfig.json
 └── .gitignore
 ```
@@ -153,7 +150,7 @@ main()
   "sites": [
     {
       "name": "사이트명",
-      "type": "css | rss | naver | tistory | brunch | youtube | substack | soonsal",
+      "type": "css | rss | naver | tistory | brunch | youtube | substack | …",
       "url": "https://...",
       "item_selector": ".post-item",
       "title_selector": ".post-title",
@@ -220,8 +217,7 @@ run_sync_pipeline()
 | `CssSelectorScraper` | `"css"` | CSS 선택자; 옵션 `fetch_detail_page` 시 상세 URL 본문 |
 | `RssScraper` | `"rss"` | RSS/Atom XML 파싱 |
 | `NaverBlogScraper` | `"naver"` | RSS 리스팅 + PostView.naver iframe 우회 |
-| `TistoryScraper` 등 | tistory/brunch/youtube/substack/soonsal | 전용 수집; 개별 스킵 통계·전량 실패 시 예외 |
-| `BaseNewsletterScraper` | (내부) | 뉴스레터 아카이브(목록+상세) 공통 로직. 새로운 뉴스레터 사이트 추가 시 상속해서 최소 코드로 구현 |
+| `TistoryScraper` 등 | tistory/brunch/youtube/substack 등 | 전용 수집; 개별 스킵 통계·전량 실패 시 예외 |
 | `ScraperFactory` | — | `.get_scraper(type)` / `.register_scraper()` |
 
 **NaverBlogScraper 특이사항**:
@@ -455,12 +451,7 @@ run_sync_pipeline()
 
 ## 6. 새 스크래퍼 추가 방법 (개발 가이드)
 
-**뉴스레터 스타일 사이트를 추가하려면** `docs/newsletter-scraper-extension.md` 를 먼저 읽으세요.  
-`BaseNewsletterScraper`를 상속하는 패턴이 표준입니다.
-
 `websync/scrapers/`에 새 스크래퍼를 추가하는 것은 4단계면 충분합니다.
-
-### 일반적인 새 타입 추가
 
 ```python
 # 1. websync/scrapers/my_type.py — BaseScraper 상속
@@ -477,33 +468,9 @@ _scrapers["my_type"] = MyScraper()
 # 3. websync/gui/sync_tab/sites.py — type_cb Combobox values + on_type_change에 추가
 type_cb = ttk.Combobox(..., values=[..., "my_type"], ...)
 # on_type_change disabled tuple에도 추가
+
+# 4. validator.py valid_types + x3_websync.spec hiddenimports 반영
 ```
-
-### 뉴스레터 사이트 추가 시 (강력 추천)
-
-뉴스레터(아카이브 목록 페이지 + 날짜별 상세 페이지) 형태라면 **newsletter_base**를 상속하세요.
-soonsal.com 구현이 좋은 예시입니다.
-
-```python
-# 1. websync/scrapers/my_newsletter.py
-import re
-from bs4 import BeautifulSoup
-from websync.scrapers.newsletter_base import BaseNewsletterScraper
-
-class MyNewsletterScraper(BaseNewsletterScraper):
-    LINK_PATTERN = re.compile(r"/archive/\d{4}/\d{2}/\d{2}\.html")
-    CONTENT_CANDIDATES = ["div.post-content", "article", "div.main"]
-
-    # 필요시 추가 정제만 override
-    def _clean_content(self, container: BeautifulSoup, site_config: dict):
-        super()._clean_content(container, site_config)
-        for ad in container.select(".ad, .paywall"):
-            ad.decompose()
-
-# 2~4 단계는 동일 (factory 등록 + GUI + validator)
-```
-
-`BaseNewsletterScraper`가 목록 파싱, 상세 fetch, 공통 cleaning, title 추출, 이미지 처리 등을 대부분 처리해줍니다.
 
 반환 형식 (모든 스크래퍼 공통):
 ```python
@@ -512,7 +479,6 @@ class MyNewsletterScraper(BaseNewsletterScraper):
     "content": str,   # HTML 문자열
     "url": str        # 중복 제거 키
 }
-```
 ```
 
 ---

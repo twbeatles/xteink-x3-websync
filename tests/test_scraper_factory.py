@@ -3,7 +3,7 @@ from websync.scrapers.factory import ScraperFactory
 
 
 def test_get_scraper_known_types():
-    for t in ("css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "soonsal"):
+    for t in ("css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "soonsal", "moneyletter"):
         scraper = ScraperFactory.get_scraper(t)
         assert scraper is not None
 
