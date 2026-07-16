@@ -3,34 +3,29 @@
 BaseNewsletterScraper를 상속. 목록은 Unlimited Elements 포스트 그리드,
 상세는 Elementor 싱글 포스트 본문을 사용한다.
 
-사용 예:
-    {
-      "name": "머니레터",
-      "type": "moneyletter",
-      "url": "https://uppity.co.kr/newsletter/money-letter/",
-      "limit": 3
-    }
+Stibee 기반 본문은 이메일용 중첩 테이블이 깊어 e-ink/EPUB 리더에서
+빈 화면처럼 보일 수 있으므로, 수집 후 선형 HTML로 재구성한다.
 """
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from urllib.parse import unquote, urljoin, urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
-from websync.scrapers.base import fetch_url
+from websync.scrapers.base import fetch_url, maybe_strip_images
 from websync.scrapers.newsletter_base import BaseNewsletterScraper
 
 
 class MoneyLetterScraper(BaseNewsletterScraper):
-    """어피티 머니레터(https://uppity.co.kr/newsletter/money-letter/) 전용 구현.
+    """어피티 머니레터 전용 구현.
 
     - 아카이브: `/newsletter/money-letter/` (+ 페이지네이션 `/2/` 등)
-    - 상세: 도메인 루트 단일 슬러그 포스트 (`/💰제목-슬러그/`)
+    - 상세: 도메인 루트 단일 슬러그 포스트
     """
 
-    # 상세 URL 판별·폴백 링크 매칭용 (실제 목록 추출은 _extract_links 오버라이드)
     LINK_PATTERN = re.compile(
         r"(?:https?://(?:www\.)?uppity\.co\.kr)?/[^/\s?#]+/?$",
         re.IGNORECASE,
@@ -41,13 +36,15 @@ class MoneyLetterScraper(BaseNewsletterScraper):
         re.IGNORECASE,
     )
 
-    # 목록/사이트 공용 경로 — 기사 슬러그가 아님
     _EXCLUDED_SLUGS = frozenset({
         "newsletter", "category", "tag", "author", "page", "product",
         "shop", "subscription", "wp-admin", "wp-login.php", "wp-content",
         "wp-json", "feed", "cart", "checkout", "my-account", "privacy-policy",
         "about", "contact", "search",
     })
+
+    # 짧은 구독/프로모 CTA 제거 키워드
+    _CTA_KEYWORDS = ("구독하기", "무료 구독", "뉴스레터 구독", "개인정보 수집", "광고성 정보")
 
     CONTENT_CANDIDATES = [
         ".elementor-widget-theme-post-content .elementor-widget-container",
@@ -93,7 +90,6 @@ class MoneyLetterScraper(BaseNewsletterScraper):
             if results:
                 return results
 
-        # 그리드 마크업이 바뀐 경우: a 태그 전체에서 상세 URL만 수집
         for a in soup.select("a[href]"):
             href = (a.get("href") or "").strip()
             if not href:
@@ -102,7 +98,6 @@ class MoneyLetterScraper(BaseNewsletterScraper):
             if full in seen or not self._is_detail_url(full):
                 continue
             title = a.get_text(strip=True) or "머니레터"
-            # 이미지 전용 링크(짧은/빈 텍스트)는 건너뛰고, 같은 URL의 제목 링크를 우선
             if len(title) < 8:
                 continue
             seen.add(full)
@@ -144,12 +139,38 @@ class MoneyLetterScraper(BaseNewsletterScraper):
             pass
         return None
 
+    def _fetch_and_clean_detail(self, url: str, site_config: dict) -> str:
+        """상세 수집 후 e-ink용 선형 HTML로 변환해 반환."""
+        try:
+            resp = fetch_url(url, timeout=15)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            container = self._find_content_container(soup)
+            if not container:
+                self.logger.warning(f"본문 컨테이너를 찾을 수 없음: {url}")
+                return ""
+
+            self._clean_content(container, site_config)
+            maybe_strip_images(container, site_config)
+
+            html_out = self._to_eink_html(container)
+            if not html_out or len(BeautifulSoup(html_out, "lxml").get_text(strip=True)) < 50:
+                self.logger.warning(f"본문 텍스트가 비정상적으로 짧음: {url}")
+                return ""
+            return html_out
+        except Exception as e:
+            self.logger.warning(f"상세 페이지 수집 실패 ({url}): {e}")
+            return ""
+
     def _clean_content(self, container: BeautifulSoup, site_config: dict) -> None:
-        """머니레터/어피티 특화 정제."""
-        super()._clean_content(container, site_config)
+        """머니레터 특화 정제 (클래스 선택자는 속성 제거 전에 수행)."""
+        # 공통 태그 제거 (nav/script 등) — 속성 strip 전에 클래스 기반 제거
+        for tag_name in ("nav", "header", "footer", "aside", "script", "style", "form", "noscript"):
+            for t in container.find_all(tag_name):
+                t.decompose()
 
         for sel in (
-            "form",
             ".elementor-widget-form",
             ".elementor-location-header",
             ".elementor-location-footer",
@@ -163,12 +184,109 @@ class MoneyLetterScraper(BaseNewsletterScraper):
             for el in container.select(sel):
                 el.decompose()
 
-        # 구독 CTA 문구가 들어간 짧은 블록 제거
         for el in list(container.find_all(["div", "section", "p", "a"])):
             txt = el.get_text(strip=True)
             if not txt:
                 continue
-            if len(txt) < 40 and any(
-                kw in txt for kw in ("구독하기", "무료 구독", "뉴스레터 구독", "개인정보 수집")
-            ):
+            if len(txt) < 40 and any(kw in txt for kw in self._CTA_KEYWORDS):
                 el.decompose()
+
+        # 속성 최소화 (EPUB 안전)
+        for tag in container.find_all(True):
+            kept = {k: v for k, v in tag.attrs.items() if k in ("href", "src", "alt", "title")}
+            tag.attrs = kept
+
+    def _to_eink_html(self, container: Tag) -> str:
+        """이메일용 중첩 테이블 HTML → e-ink 친화 선형 HTML."""
+        self._unwrap_layout_tables(container)
+        self._unwrap_inline_wrappers(container)
+        self._remove_empty_nodes(container)
+
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        for el in container.find_all(["h1", "h2", "h3", "h4", "p", "li", "div"]):
+            if not isinstance(el, Tag):
+                continue
+            # 자식에 블록이 있으면 컨테이너로만 보고 건너뜀 (리프 텍스트만)
+            if el.name == "div" and el.find(["h1", "h2", "h3", "h4", "p", "li", "div", "ul", "ol"]):
+                continue
+            if el.name != "div" and el.find(["h1", "h2", "h3", "h4", "p", "li"]):
+                continue
+
+            text = " ".join(el.get_text(" ", strip=True).split())
+            if len(text) < 2:
+                continue
+            if text in seen:
+                continue
+            # 이미 수집한 긴 블록의 완전 부분 문자열은 스킵 (중복 방지)
+            if any(text != s and text in s for s in seen if len(s) > len(text) + 10):
+                continue
+            seen.add(text)
+
+            if el.name in ("h1", "h2", "h3", "h4") or self._looks_like_heading(text):
+                parts.append(f"<h2>{html_lib.escape(text)}</h2>")
+            elif el.name == "li":
+                parts.append(f"<p>• {html_lib.escape(text)}</p>")
+            else:
+                parts.append(f"<p>{html_lib.escape(text)}</p>")
+
+        if not parts:
+            for line in container.get_text("\n", strip=True).splitlines():
+                line = " ".join(line.split())
+                if len(line) < 2 or line in seen:
+                    continue
+                seen.add(line)
+                parts.append(f"<p>{html_lib.escape(line)}</p>")
+
+        if not parts:
+            return ""
+        return "<div>\n" + "\n".join(parts) + "\n</div>"
+
+    @staticmethod
+    def _unwrap_layout_tables(container: Tag) -> None:
+        """table/tr/td 레이아웃 껍질을 제거해 본문 흐름만 남긴다."""
+        for _ in range(40):
+            tags = container.find_all(
+                ["table", "tbody", "thead", "tfoot", "tr", "td", "th", "colgroup", "col"]
+            )
+            if not tags:
+                break
+            for t in tags:
+                t.unwrap()
+
+    @staticmethod
+    def _unwrap_inline_wrappers(container: Tag) -> None:
+        for tag_name in ("span", "font", "center", "b", "i", "u", "strong", "em"):
+            for el in list(container.find_all(tag_name)):
+                # 의미 있는 링크 안의 강조는 unwrap만
+                el.unwrap()
+
+    @staticmethod
+    def _remove_empty_nodes(container: Tag) -> None:
+        for el in list(container.find_all(["a", "div", "p", "li"])):
+            if el.get_text(strip=True):
+                continue
+            if el.find("img"):
+                continue
+            el.decompose()
+
+    @staticmethod
+    def _looks_like_heading(text: str) -> bool:
+        """짧은 이모지 섹션 제목 등."""
+        if len(text) > 48:
+            return False
+        # 보충 평면 이모지·심볼 범위 (대략)
+        emoji_like = sum(
+            1
+            for ch in text
+            if ord(ch) >= 0x2190  # arrows etc.
+            and (
+                0x2190 <= ord(ch) <= 0x21FF
+                or 0x2600 <= ord(ch) <= 0x27BF
+                or 0x1F300 <= ord(ch) <= 0x1FAFF
+            )
+        )
+        if emoji_like and len(text) <= 40:
+            return True
+        return False
