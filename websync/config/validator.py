@@ -82,7 +82,7 @@ def validate_site(site: dict) -> list[str]:
         errors.append(f"URL은 http:// 또는 https://로 시작해야 합니다 (현재: {url[:50]})")
 
     site_type = site.get("type", "css")
-    valid_types = ("css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post")
+    valid_types = ("css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "soonsal")
     if site_type not in valid_types:
         errors.append(f"타입이 유효하지 않습니다: {site_type}")
 

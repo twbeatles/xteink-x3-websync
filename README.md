@@ -9,7 +9,7 @@ Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 
 ## 주요 기능 ✨
 
 1. **다중 사이트 뉴스 수집 및 EPUB 빌드**
-   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe` (카페), `naver_post` (포스트)
+   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe` (카페), `naver_post` (포스트), `soonsal` (순살브리핑 뉴스레터)
    - 사이트별 이미지 포함/제거, 번역, AI 요약(선택) 지원
    - SQLite 이력 DB로 증분 동기화 (중복 전송 방지)
    - e-ink 최적화 한국어 EPUB 생성 (표지 자동 생성 옵션)
@@ -69,7 +69,7 @@ xteink-x3-websync/
 | `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅, TypedDict 정의 |
 | `websync.config` | `config.json` CRUD, 스키마 유효성 검증 |
 | `websync.pipeline` | 동기화 파사드 + 프리뷰/선택 전송/합본 러너 분리 |
-| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post + 팩토리 |
+| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post/soonsal + newsletter_base(확장용) + 팩토리 |
 | `websync.epub` | EPUB 빌더 (CSS·표지·정제 모듈 분리) |
 | `websync.upload` | 업로드 + CrossPoint 파일 관리 API 클라이언트 |
 | `websync.db` | SQLite 동기화 이력 |

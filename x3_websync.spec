@@ -42,7 +42,7 @@ a = Analysis(
         'websync.scrapers', 'websync.scrapers.css', 'websync.scrapers.rss',
         'websync.scrapers.naver', 'websync.scrapers.naver_common', 'websync.scrapers.naver_cafe', 'websync.scrapers.naver_post',
         'websync.scrapers.tistory', 'websync.scrapers.brunch',
-        'websync.scrapers.youtube', 'websync.scrapers.substack',
+        'websync.scrapers.youtube', 'websync.scrapers.substack', 'websync.scrapers.soonsal', 'websync.scrapers.newsletter_base',
         'websync.epub', 'websync.upload', 'websync.pipeline',
         'websync.integrations', 'websync.scheduler', 'websync.servers',
         'websync.watch', 'websync.gui',

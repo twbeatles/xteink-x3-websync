@@ -9,6 +9,7 @@ from websync.scrapers.youtube import YoutubeScraper
 from websync.scrapers.substack import SubstackScraper
 from websync.scrapers.naver_cafe import NaverCafeScraper
 from websync.scrapers.naver_post import NaverPostScraper
+from websync.scrapers.soonsal import SoonsalScraper
 
 
 class ScraperFactory:
@@ -22,6 +23,7 @@ class ScraperFactory:
         "substack": SubstackScraper(),
         "naver_cafe": NaverCafeScraper(),
         "naver_post": NaverPostScraper(),
+        "soonsal": SoonsalScraper(),
     }
 
 

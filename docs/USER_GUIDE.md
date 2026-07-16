@@ -105,6 +105,7 @@ GUI 없이 설정된 사이트만 수집·전송합니다.
 | `tistory` | 티스토리 블로그 | 블로그 주소 |
 | `brunch` | 브런치 | 작가/매거진 주소 |
 | `substack` | Substack 뉴스레터 | 서브스택 URL |
+| `soonsal` | 순살브리핑 뉴스레터 | https://soonsal.com/newsletters/ |
 | `youtube` | 유튜브 채널 자막 → 텍스트 | 채널/영상 URL |
 | `css` | 위 전용 유형이 없을 때 HTML 선택자로 수집 | 목록 페이지 URL |
 

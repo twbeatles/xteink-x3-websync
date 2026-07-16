@@ -83,7 +83,7 @@ class SyncSitesMixin:
         # M6: naver_cafe, naver_post 추가
         type_cb = ttk.Combobox(
             form,
-            values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post"],
+            values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "soonsal"],
             state="readonly",
             width=15
         )
@@ -140,7 +140,7 @@ class SyncSitesMixin:
 
         def on_type_change(event=None):
             t = type_cb.get()
-            state = "disabled" if t in ("rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post") else "normal"
+            state = "disabled" if t in ("rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "soonsal") else "normal"
             for w in (item_entry, title_entry, content_entry, remove_entry):
                 w.config(state=state)
             detail_cb.config(state="normal" if t == "css" else "disabled")
