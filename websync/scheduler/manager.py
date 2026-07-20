@@ -2,17 +2,39 @@ import os
 import sys
 import shlex
 import subprocess
+from pathlib import PureWindowsPath
+
 
 class SchedulerManager:
     """작업 스케줄러 등록 및 제어를 전담하는 클래스 (Windows/macOS/Linux 크로스플랫폼 지원)"""
     TASK_NAME = "XteinkX3WebSyncTask"
 
     def __init__(self, script_path: str = None):
-        if script_path is None:
-            self.script_path = os.path.abspath(sys.argv[0])
-        else:
-            self.script_path = os.path.abspath(script_path)
-        self.project_dir = os.path.dirname(self.script_path)
+        raw = sys.argv[0] if script_path is None else script_path
+        self.script_path = self._resolve_script_path(raw)
+        self.project_dir = self._dirname_for_script(self.script_path)
+
+    @staticmethod
+    def _is_windows_abs_path(path: str) -> bool:
+        """드라이브 문자 절대 경로(C:\\… / C:/…)인지 여부. POSIX abspath가 망가뜨리지 않게 한다."""
+        if not path or len(path) < 3:
+            return False
+        return path[0].isalpha() and path[1] == ":" and path[2] in "\\/"
+
+    @classmethod
+    def _resolve_script_path(cls, path: str) -> str:
+        """호스트 OS와 무관하게 Windows 절대 경로는 그대로 유지 (CI·단위 테스트 안전)."""
+        if cls._is_windows_abs_path(path):
+            return path
+        return os.path.abspath(path)
+
+    @classmethod
+    def _dirname_for_script(cls, path: str) -> str:
+        """Windows 절대 경로는 PureWindowsPath로 부모를 구한다 (Linux에서 \\ 분리 실패 방지)."""
+        if cls._is_windows_abs_path(path):
+            parent = PureWindowsPath(path).parent
+            return str(parent)
+        return os.path.dirname(path)
 
     def register_daily_task(self, hour: str, minute: str) -> bool:
         """플랫폼에 맞는 일간 스케줄 등록"""
