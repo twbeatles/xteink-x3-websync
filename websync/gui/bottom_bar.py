@@ -54,7 +54,7 @@ class BottomBar(ttk.Frame):
             bg=TEXT_BG,
             fg=FG_COLOR,
             insertbackground=FG_COLOR,
-            font=("Consolas", 9),
+            font=("Malgun Gothic", 9),
             wrap="word",
         )
         self.log_txt.pack(side="left", fill="both", expand=True)
