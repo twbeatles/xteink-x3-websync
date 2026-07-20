@@ -37,7 +37,8 @@ xteink-x3-websync/
 │   ├── scrapers/
 │   │   ├── base.py            # BaseScraper, 공통 유틸
 │   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py / …
-│   │   └── factory.py         # ScraperFactory (OCP: register_scraper)
+│   │   ├── soonsal.py / moneyletter.py
+│   │   └── factory.py         # ScraperFactory (OCP: register_scraper) — 11종
 │   ├── epub/
 │   │   ├── builder.py         # EPUB 빌더 파사드
 │   │   ├── css.py / cover.py / sanitize.py  # CSS·표지·본문 정제 (SRP)
@@ -50,16 +51,19 @@ xteink-x3-websync/
 │   │   ├── uploader.py        # 무선 업로드
 │   │   └── device_client.py   # CrossPoint 파일 API 클라이언트
 │   ├── pipeline/
-│   │   ├── service.py         # SyncService 파사드 (락·설정·위임)
+│   │   ├── service.py         # SyncService 파사드 (락·설정·백업 훅·위임)
 │   │   ├── sync_pipeline.py   # 전체 사이트 동기화 실행
-│   │   ├── preview.py         # 프리뷰(스크래핑만)
+│   │   ├── preview.py         # 프리뷰(스크래핑만, 파이프라인 락 공유)
 │   │   ├── selected_sync.py   # 선택 기사 동기화
 │   │   ├── article_keys.py    # 기사 URL 키
 │   │   ├── summarizer.py      # AI 요약
 │   │   └── translator.py      # 번역
+│   ├── backup/                # 클라우드 백업 (sites.json + synced_posts.json)
+│   │   ├── service.py         # BackupSyncService pull/push
+│   │   ├── atomic_io.py / format.py
 │   ├── integrations/
 │   │   ├── calibre.py         # calibredb.exe 래퍼
-│   │   └── notifier.py        # 윈도우 토스트 알림
+│   │   └── notifier.py        # 크로스플랫폼 토스트 알림
 │   ├── scheduler/
 │   │   └── manager.py         # schtasks / launchd / crontab
 │   ├── servers/
@@ -73,7 +77,7 @@ xteink-x3-websync/
 │       ├── app_core/          # SyncAppGui (layout/helpers/config_sync/sync_control)
 │       ├── sync_tab/          # 뉴스 동기화 탭 (connection/devices/sites/schedule/preview)
 │       ├── device_files/      # 기기 파일 탭 (browser/actions/cleanup/settings)
-│       ├── settings_tab/      # 고급 설정 (epub/servers/watch/ai_translation)
+│       ├── settings_tab/      # 고급 설정 (epub/servers/watch/ai_translation/backup_sync)
 │       ├── tab_*.py           # 하위 호환 re-export (sync/device_files/settings)
 │       ├── app.py             # 하위 호환 re-export → app_core
 │       ├── tab_calibre.py     # Calibre 서재 탭
@@ -91,10 +95,11 @@ xteink-x3-websync/
 ├── requirements-optional.txt  # Pillow, googletrans, youtube, watchdog
 ├── .github/workflows/test.yml # CI: pytest
 ├── README.md / CLAUDE.md
-├── docs/                  # 상세 문서 (USER_GUIDE, FEATURE_PROPOSALS, PROJECT_AUDIT 등)
+├── PROJECT_AUDIT.md           # 최신 기능 구현 감사 (루트)
+├── docs/                  # 상세 문서 (USER_GUIDE, FEATURE_PROPOSALS 등)
 │   ├── USER_GUIDE.md
 │   ├── FEATURE_PROPOSALS.md
-│   └── PROJECT_AUDIT.md
+│   └── PROJECT_AUDIT.md       # 구버전 감사 — 최신은 루트 PROJECT_AUDIT.md 참고
 ├── pyrightconfig.json
 └── .gitignore
 ```
@@ -133,11 +138,13 @@ main()
 | 동시성 보호 | `threading.Lock()` 클래스 수준 락 |
 | 내부 메서드 | `_save_config_unlocked()` — 원자적 쓰기(tmp+bak+replace), `ConfigLoadError` |
 | 스키마 버전 | `config_version` (현재 2), 결손 키 자동 보강 |
+| RMW 안전 | `_config_revision` CAS + `update_config(mutator)` / `ConfigConflictError` |
 
 **설정 스키마** (`config.json`):
 ```json
 {
   "config_version": 2,
+  "_config_revision": 0,
   "x3_ip": "crosspoint.local",
   "x3_devices": [{"name": "침실", "ip": "192.168.1.20"}],
   "output_dir": "./output",
@@ -147,6 +154,13 @@ main()
   "font_size": 16,
   "line_height": 1.7,
   "epub_cover": true,
+  "backup_sync": {
+    "enabled": false,
+    "folder": "",
+    "include_history": true,
+    "auto_export": true,
+    "auto_import_on_start": true
+  },
   "sites": [
     {
       "name": "사이트명",

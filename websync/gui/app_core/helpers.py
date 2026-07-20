@@ -14,7 +14,8 @@ from websync.scheduler.manager import SchedulerManager
 from websync.integrations.notifier import ToastNotifier
 from websync.pipeline.service import SyncService
 from websync.core.logger import get_log_dir
-from websync.config.exceptions import ConfigSaveError
+from websync.config.exceptions import ConfigSaveError, ConfigConflictError
+from websync.backup.format import merge_sites
 from websync.gui.widgets import (
     BG_COLOR, FG_COLOR, ACCENT_COLOR, SECONDARY_BG, TEXT_BG, GREEN_COLOR, RED_COLOR, YELLOW_COLOR, HINT_COLOR,
     center_window, setup_dialog
@@ -98,10 +99,47 @@ class AppHelpersMixin:
         return all(results.values()), bool(ok_labels), " | ".join(parts)
 
     def _safe_save_config(self, config: dict, *, parent=None, reload: bool = False) -> bool:
+        """설정을 저장합니다. revision CAS로 동시 갱신(백업 pull 등)과 충돌을 감지합니다."""
         try:
-            self.service.config_manager.save_config(config)
-            if reload:
-                self.service._reload_config()
+            # 치명적 검증 오류 시 저장 거부
+            errors = self.service.config_manager.get_validation_errors(config)
+            fatal = [e for e in errors if self._is_fatal_config_error(e)]
+            if fatal:
+                msg = "설정 검증 실패:\n" + "\n".join(f"• {e}" for e in fatal[:8])
+                messagebox.showerror("설정 검증 실패", msg, parent=parent)
+                self._log_message(f"❌ 설정 검증 실패: {fatal[0]}")
+                return False
+
+            expected = config.get("_config_revision")
+            try:
+                expected_i = int(expected) if expected is not None else None
+            except (TypeError, ValueError):
+                expected_i = None
+
+            try:
+                self.service.config_manager.save_config(
+                    config, expected_revision=expected_i
+                )
+            except ConfigConflictError as e:
+                # 디스크 최신본 + 메모리 의도 병합 후 재시도
+                disk = e.disk_config or self.service.config_manager.load_config()
+                merged = self._merge_config_on_conflict(disk, config)
+                try:
+                    disk_rev = int(disk.get("_config_revision") or 0)
+                except (TypeError, ValueError):
+                    disk_rev = 0
+                merged["_config_revision"] = disk_rev
+                self.service.config_manager.save_config(
+                    merged, expected_revision=disk_rev
+                )
+                config.clear()
+                config.update(merged)
+                self._log_message("☁ 설정 충돌을 병합해 저장했습니다 (백업/다른 작업과 동기화).")
+
+            # 항상 service.config 를 디스크와 맞춤 (stale 참조 방지)
+            self.service._reload_config()
+            if config is not self.service.config:
+                config["_config_revision"] = self.service.config.get("_config_revision")
             return True
         except ConfigSaveError as e:
             messagebox.showerror("설정 저장 실패", str(e), parent=parent)
@@ -111,6 +149,40 @@ class AppHelpersMixin:
             messagebox.showerror("설정 저장 실패", str(e), parent=parent)
             self._log_message(f"❌ 설정 저장 실패: {e}")
             return False
+
+    @staticmethod
+    def _is_fatal_config_error(err: str) -> bool:
+        """저장을 막을 검증 오류 (경고성 제외)."""
+        fatal_markers = (
+            "URL은 http://",
+            "URL이 비어",
+            "타입이 유효하지 않습니다",
+            "포트 범위",
+            "유효한 정수여야",
+            "epub_merge_mode",
+            "epub_theme",
+            "limit:",
+            "font_size:",
+            "line_height:",
+        )
+        return any(m in err for m in fatal_markers)
+
+    @staticmethod
+    def _merge_config_on_conflict(disk: dict, memory: dict) -> dict:
+        """충돌 시: 디스크 기반 + 메모리 top-level 덮어쓰기, sites는 URL 합집합(메모리 우선)."""
+        import copy
+        out = copy.deepcopy(disk)
+        for key, val in memory.items():
+            if key in ("sites", "_config_revision"):
+                continue
+            out[key] = copy.deepcopy(val)
+        mem_sites = memory.get("sites") if isinstance(memory.get("sites"), list) else []
+        disk_sites = out.get("sites") if isinstance(out.get("sites"), list) else []
+        # memory wins same URL
+        out["sites"] = merge_sites(
+            disk_sites, mem_sites, remote_wins_same_url=True
+        )
+        return out
 
     def _get_log_for_web(self) -> str:
         try:

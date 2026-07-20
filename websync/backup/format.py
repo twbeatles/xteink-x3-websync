@@ -1,0 +1,162 @@
+"""포터블 백업 JSON 스키마 및 병합 유틸."""
+from __future__ import annotations
+
+import copy
+from datetime import datetime
+from typing import Any
+
+FORMAT_NAME = "xteink-websync-backup"
+FORMAT_VERSION = 1
+SITES_EXPORT_VERSION = 2
+HISTORY_EXPORT_VERSION = 1
+
+SITES_FILENAME = "sites.json"
+HISTORY_FILENAME = "synced_posts.json"
+MANIFEST_FILENAME = "manifest.json"
+LOCK_FILENAME = ".backup_sync.lock"
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def parse_iso(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    # "2026-07-20T12:34:56" 또는 공백 구분
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00").replace(" ", "T", 1))
+    except ValueError:
+        return None
+
+
+def is_remote_newer(remote_at: str | None, local_at: str | None) -> bool:
+    """remote exported_at 이 local 마지막 push 시각보다 최신이면 True.
+
+    로컬 시각이 없으면 remote 가 있을 때 True (초기 pull).
+    remote 시각이 없으면 False.
+    """
+    r = parse_iso(remote_at)
+    if r is None:
+        return False
+    l = parse_iso(local_at)
+    if l is None:
+        return True
+    return r > l
+
+
+def build_sites_payload(sites: list[dict], exported_at: str | None = None) -> dict:
+    return {
+        "export_version": SITES_EXPORT_VERSION,
+        "kind": "sites",
+        "exported_at": exported_at or now_iso(),
+        "sites": copy.deepcopy(sites),
+    }
+
+
+def build_history_payload(posts: list[dict], exported_at: str | None = None) -> dict:
+    return {
+        "export_version": HISTORY_EXPORT_VERSION,
+        "kind": "synced_posts",
+        "exported_at": exported_at or now_iso(),
+        "posts": copy.deepcopy(posts),
+    }
+
+
+def build_manifest(
+    *,
+    exported_at: str | None = None,
+    components: list[str] | None = None,
+) -> dict:
+    return {
+        "format": FORMAT_NAME,
+        "format_version": FORMAT_VERSION,
+        "exported_at": exported_at or now_iso(),
+        "app": "xteink-x3-websync",
+        "components": components or ["sites", "synced_posts"],
+    }
+
+
+def extract_sites(payload: Any) -> tuple[list[dict], str | None]:
+    """sites.json 또는 레거시 export 파일에서 (sites, exported_at) 추출."""
+    if not isinstance(payload, dict):
+        return [], None
+    sites = payload.get("sites")
+    if not isinstance(sites, list):
+        return [], None
+    cleaned: list[dict] = [s for s in sites if isinstance(s, dict)]
+    exported_at = payload.get("exported_at")
+    if not isinstance(exported_at, str):
+        exported_at = None
+    return cleaned, exported_at
+
+
+def extract_posts(payload: Any) -> tuple[list[dict], str | None]:
+    if not isinstance(payload, dict):
+        return [], None
+    posts = payload.get("posts")
+    if not isinstance(posts, list):
+        return [], None
+    cleaned: list[dict] = [p for p in posts if isinstance(p, dict)]
+    exported_at = payload.get("exported_at")
+    if not isinstance(exported_at, str):
+        exported_at = None
+    return cleaned, exported_at
+
+
+def _site_url_key(site: dict) -> str:
+    return (site.get("url") or "").strip().lower()
+
+
+def merge_sites(
+    local_sites: list[dict],
+    remote_sites: list[dict],
+    *,
+    remote_wins_same_url: bool,
+    default_site: dict | None = None,
+) -> list[dict]:
+    """URL 기준 사이트 병합.
+
+    - remote_wins_same_url=True: 동일 URL은 remote 필드로 덮어씀 (DEFAULT_SITE 머지)
+    - False: 동일 URL은 local 유지, remote-only URL만 추가
+    - 로컬에만 있는 URL은 항상 유지
+    - 순서는 local 순서 우선, 그다음 remote-only 추가
+    """
+    from websync.config.manager import ConfigManager
+
+    base = default_site if default_site is not None else ConfigManager.DEFAULT_SITE
+    by_url: dict[str, dict] = {}
+    order: list[str] = []
+
+    def _put(site: dict, overwrite: bool) -> None:
+        key = _site_url_key(site)
+        if not key:
+            # URL 없는 사이트: 로컬 순서 보존용 유니크 키
+            key = f"__nourl__{id(site)}"
+        if key in by_url and not overwrite:
+            return
+        merged, _ = ConfigManager._deep_merge(base, site)
+        if key not in by_url:
+            order.append(key)
+        by_url[key] = merged
+
+    for s in local_sites:
+        if isinstance(s, dict):
+            _put(s, overwrite=True)
+
+    for s in remote_sites:
+        if not isinstance(s, dict):
+            continue
+        key = _site_url_key(s)
+        if not key:
+            continue
+        if key in by_url:
+            if remote_wins_same_url:
+                _put(s, overwrite=True)
+        else:
+            _put(s, overwrite=True)
+
+    return [by_url[k] for k in order if k in by_url]

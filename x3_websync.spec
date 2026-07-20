@@ -39,6 +39,7 @@ a = Analysis(
     hiddenimports=[
         'lxml', 'ebooklib', 'bs4', 'requests',
         'websync', 'websync.core', 'websync.config', 'websync.config.exceptions', 'websync.config.validator', 'websync.db',
+        'websync.backup', 'websync.backup.service', 'websync.backup.atomic_io', 'websync.backup.format',
         'websync.scrapers', 'websync.scrapers.css', 'websync.scrapers.rss',
         'websync.scrapers.naver', 'websync.scrapers.naver_common', 'websync.scrapers.naver_cafe', 'websync.scrapers.naver_post',
         'websync.scrapers.tistory', 'websync.scrapers.brunch',
@@ -53,6 +54,7 @@ a = Analysis(
         'websync.gui.sync_tab', 'websync.gui.sync_tab.tab',
         'websync.gui.device_files', 'websync.gui.device_files.tab',
         'websync.gui.settings_tab', 'websync.gui.settings_tab.tab',
+        'websync.gui.settings_tab.backup_sync',
         'websync.gui.app_core', 'websync.gui.app_core.app',
         'websync.upload.host', 'websync.upload.remote_path', 'websync.upload.sync_epub',
         'websync.upload.errors', 'websync.upload.device_client', 'websync.upload.uploader',

@@ -37,6 +37,7 @@ class SyncSitesMixin:
         if not self.app._safe_save_config(config):
             return
         self._refresh_site_tree()
+        self.service.schedule_backup_push()
 
     def _delete_site(self):
         selected = self.tree.selection()
@@ -50,6 +51,7 @@ class SyncSitesMixin:
         if not self.app._safe_save_config(config):
             return
         self._refresh_site_tree()
+        self.service.schedule_backup_push()
 
     def _add_site_popup(self):
         self._open_site_dialog("사이트 등록", None)
@@ -201,6 +203,7 @@ class SyncSitesMixin:
             if not self.app._safe_save_config(config, parent=dialog):
                 return
             self._refresh_site_tree()
+            self.service.schedule_backup_push()
             dialog.destroy()
 
         dlg_btn_frame = ttk.Frame(dialog)
@@ -246,6 +249,7 @@ class SyncSitesMixin:
                 # 명시적으로 config를 리로드하여 _refresh_site_tree가 최신 사이트를 반영하도록 함
                 self.service._reload_config()
                 self._refresh_site_tree()
+                self.service.schedule_backup_push()
                 names = ", ".join([s.get("name", "") for s in added_sites])
                 messagebox.showinfo("완료", f"새로운 사이트 {len(added_sites)}개가 추가되었습니다:\n{names}")
             else:

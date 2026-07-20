@@ -92,6 +92,9 @@ class AppConfigSyncMixin:
         self.tab_settings.trans_enabled_var.set(trans_conf.get("enabled", False))
         self.tab_settings.trans_provider_cb.set(trans_conf.get("provider", "googletrans"))
 
+        # 클라우드 백업 동기화
+        self.tab_settings._load_backup_sync_from_config(config)
+
     def _save_ui_settings(self):
         config = self.service.config
         
@@ -136,12 +139,18 @@ class AppConfigSyncMixin:
         
         config.setdefault("calibre_watch", {})["watch_dir"] = self.tab_settings.watch_dir_entry.get().strip()
 
+        # 클라우드 백업 동기화
+        if hasattr(self.tab_settings, "_collect_backup_sync_into_config"):
+            self.tab_settings._collect_backup_sync_into_config(config)
+
         # 저장 실행
         if not self._safe_save_config(config, reload=True):
             return
         
         self.calibre.calibre_path = config["calibre_path"]
         self.calibre.library_path = config["calibre_library_path"]
+        if hasattr(self.tab_settings, "_refresh_backup_status_label"):
+            self.tab_settings._refresh_backup_status_label()
 
     # ------------------------------------------------------------------
     # 즉시 동기화 실행

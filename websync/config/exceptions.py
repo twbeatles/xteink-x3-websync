@@ -11,3 +11,11 @@ class ConfigLoadError(Exception):
 
 class ConfigSaveError(Exception):
     """config.json 저장 실패"""
+
+
+class ConfigConflictError(ConfigSaveError):
+    """다른 경로가 config.json을 먼저 갱신해 저장이 거부됨 (revision CAS)."""
+
+    def __init__(self, message: str, disk_config: dict | None = None):
+        super().__init__(message)
+        self.disk_config = disk_config

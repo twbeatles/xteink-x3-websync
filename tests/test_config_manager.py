@@ -58,3 +58,51 @@ def test_save_config_raises_on_failure():
         with patch("builtins.open", side_effect=OSError("disk full")):
             with pytest.raises(ConfigSaveError):
                 cm.save_config(cfg)
+
+
+def test_config_revision_cas_conflict():
+    from websync.config.exceptions import ConfigConflictError
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        cm = ConfigManager(path)
+        cfg = cm.load_config()
+        rev0 = int(cfg.get("_config_revision") or 0)
+
+        # A 저장
+        cfg["x3_ip"] = "10.0.0.1"
+        cm.save_config(cfg, expected_revision=rev0)
+        cfg_a = cm.load_config()
+        rev_a = int(cfg_a["_config_revision"])
+
+        # 오래된 revision 으로 저장 → 충돌
+        stale = dict(cfg)
+        stale["x3_ip"] = "10.0.0.99"
+        stale["_config_revision"] = rev0
+        with pytest.raises(ConfigConflictError) as exc:
+            cm.save_config(stale, expected_revision=rev0)
+        assert exc.value.disk_config is not None
+
+        # 최신 revision 으로는 성공
+        cfg_a["x3_ip"] = "10.0.0.2"
+        cm.save_config(cfg_a, expected_revision=rev_a)
+        assert cm.load_config()["x3_ip"] == "10.0.0.2"
+
+
+def test_update_config_rmw():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        cm = ConfigManager(path)
+        cm.load_config()
+
+        def mut(cfg):
+            cfg["x3_ip"] = "192.168.9.9"
+            cfg.setdefault("sites", []).append(
+                {"name": "X", "type": "rss", "url": "https://x.test/feed", "limit": 1}
+            )
+
+        saved = cm.update_config(mut)
+        assert saved["x3_ip"] == "192.168.9.9"
+        loaded = cm.load_config()
+        assert loaded["x3_ip"] == "192.168.9.9"
+        assert any(s.get("url") == "https://x.test/feed" for s in loaded["sites"])

@@ -44,7 +44,14 @@ def test_api_sync_requires_bearer():
     def busy_cb():
         return busy["running"]
 
-    srv = _start_dashboard(api_token="tok123", pipeline_busy_callback=busy_cb)
+    def sync_cb():
+        return True
+
+    srv = _start_dashboard(
+        api_token="tok123",
+        pipeline_busy_callback=busy_cb,
+        sync_callback=sync_cb,
+    )
     try:
         url = f"http://127.0.0.1:{srv.port}/api/sync"
         req = urllib.request.Request(url, method="POST")
@@ -54,6 +61,7 @@ def test_api_sync_requires_bearer():
 
         req = urllib.request.Request(url, method="POST", headers={"Authorization": "Bearer tok123"})
         with urllib.request.urlopen(req, timeout=3) as resp:
+            assert resp.status in (200, 202)
             data = json.loads(resp.read())
         assert "message" in data
     finally:
@@ -68,9 +76,11 @@ def test_api_sync_busy_response():
     try:
         url = f"http://127.0.0.1:{srv.port}/api/sync"
         req = urllib.request.Request(url, method="POST", headers={"Authorization": "Bearer tok123"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-        assert "이미 실행" in data.get("message", "")
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=3)
+        assert exc.value.code == 409
+        body = json.loads(exc.value.read().decode())
+        assert "이미 실행" in body.get("message", "")
     finally:
         srv.stop()
 

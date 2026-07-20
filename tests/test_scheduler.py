@@ -1,4 +1,5 @@
 import shlex
+import sys
 from unittest.mock import patch, MagicMock
 
 from websync.scheduler.manager import SchedulerManager
@@ -17,6 +18,17 @@ def test_linux_cron_quotes_paths_with_spaces():
     cron_input = mock_run.call_args_list[-1].kwargs.get("input", "")
     assert shlex.quote(mgr.project_dir) in cron_input
     assert shlex.quote(mgr.script_path) in cron_input
+
+
+def test_windows_tr_command_quotes_paths_with_spaces():
+    mgr = SchedulerManager(script_path=r"C:\Users\First Last\x3\x3_websync.py")
+    mgr.project_dir = r"C:\Users\First Last\x3"
+    with patch.object(sys, "executable", r"C:\Program Files\Python\python.exe"):
+        with patch("os.path.exists", return_value=True):
+            tr = mgr.build_windows_tr_command()
+    assert 'cd /d "C:\\Users\\First Last\\x3"' in tr
+    assert '"C:\\Users\\First Last\\x3\\x3_websync.py"' in tr
+    assert "--sync" in tr
 
 
 def test_macos_unloads_before_load():

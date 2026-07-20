@@ -7,6 +7,7 @@ from websync.config.manager import ConfigManager
 from websync.db.history import SyncHistoryDb
 from websync.core.logger import get_logger
 from websync.core.process_lock import ProcessFileLock
+from websync.backup.service import BackupSyncService
 from websync.pipeline.article_keys import article_sync_key
 from websync.pipeline.sync_pipeline import run_sync_pipeline_locked
 from websync.pipeline.preview import preview_articles as run_preview_articles
@@ -24,7 +25,10 @@ class SyncService:
         self.config = self.config_manager.load_config()
         self.db = SyncHistoryDb()
         self.logger = get_logger()
+        self.backup_sync = BackupSyncService(self.config_manager, self.db, self.logger)
         self._last_pipeline_result: dict = {}
+        self._backup_push_timer: threading.Timer | None = None
+        self._backup_timer_lock = threading.Lock()
         self._apply_config_to_components()
 
     def _apply_config_to_components(self):
@@ -55,6 +59,103 @@ class SyncService:
         """최신 설정을 리로드하고 서비스 컴포넌트에 반영"""
         self.config = self.config_manager.load_config()
         self._apply_config_to_components()
+
+    def _backup_cfg(self) -> dict:
+        bs = self.config.get("backup_sync") if isinstance(self.config, dict) else None
+        if not isinstance(bs, dict):
+            self._reload_config()
+            bs = self.config.get("backup_sync")
+        return bs if isinstance(bs, dict) else {}
+
+    def maybe_backup_pull(
+        self,
+        *,
+        force: bool = False,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """시작/파이프라인 전 클라우드 → 로컬 가져오기."""
+        self._reload_config()
+        bs = self._backup_cfg()
+        if not force and not (bs.get("enabled") and bs.get("auto_import_on_start", True)):
+            return {"ok": True, "skipped": True, "message": "자동 가져오기 비활성"}
+        if not self.backup_sync.is_configured() and not force:
+            return {"ok": True, "skipped": True, "message": "백업 동기화 미설정"}
+        result = self.backup_sync.pull(force=force)
+        self._reload_config()
+        msg = result.get("message") or ""
+        if msg and not result.get("skipped"):
+            self.logger.info(f"[backup] pull: {msg}")
+            if log_callback:
+                log_callback(f"☁ 백업 가져오기: {msg}")
+        return result
+
+    def maybe_backup_push(
+        self,
+        *,
+        force: bool = False,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """파이프라인/사이트 변경 후 로컬 → 클라우드 내보내기."""
+        self._reload_config()
+        bs = self._backup_cfg()
+        if not force and not (bs.get("enabled") and bs.get("auto_export", True)):
+            return {"ok": True, "skipped": True, "message": "자동 내보내기 비활성"}
+        if not self.backup_sync.is_configured() and not force:
+            return {"ok": True, "skipped": True, "message": "백업 동기화 미설정"}
+        result = self.backup_sync.push(force=force)
+        self._reload_config()
+        msg = result.get("message") or ""
+        if msg and not result.get("skipped"):
+            self.logger.info(f"[backup] push: {msg}")
+            if log_callback:
+                log_callback(f"☁ 백업 내보내기: {msg}")
+        return result
+
+    def schedule_backup_push(self, delay: float = 1.5) -> None:
+        """사이트 저장 등 연속 변경 시 디바운스 후 push."""
+        bs = self._backup_cfg()
+        if not (bs.get("enabled") and bs.get("auto_export", True)):
+            return
+        if not self.backup_sync.is_configured():
+            return
+
+        def _fire():
+            try:
+                self.maybe_backup_push()
+            except Exception as e:
+                self.logger.warning(f"[backup] 예약 내보내기 실패: {e}")
+
+        with self._backup_timer_lock:
+            if self._backup_push_timer is not None:
+                try:
+                    self._backup_push_timer.cancel()
+                except Exception:
+                    pass
+            timer = threading.Timer(delay, _fire)
+            timer.daemon = True
+            self._backup_push_timer = timer
+            timer.start()
+
+    def run_backup_sync_now(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """수동 양방향 동기화."""
+        result = self.backup_sync.sync_now()
+        self._reload_config()
+        msg_parts = []
+        pull = result.get("pull") or {}
+        push = result.get("push") or {}
+        if pull.get("message"):
+            msg_parts.append(f"가져오기: {pull['message']}")
+        if push.get("message"):
+            msg_parts.append(f"내보내기: {push['message']}")
+        msg = " | ".join(msg_parts) if msg_parts else result.get("message", "")
+        if msg:
+            self.logger.info(f"[backup] sync_now: {msg}")
+            if log_callback:
+                log_callback(f"☁ 백업 동기화: {msg}")
+        return result
 
     @staticmethod
     def _article_sync_key(article: dict, site_name: str, base_url: str) -> str:
@@ -90,7 +191,11 @@ class SyncService:
             return False
 
         try:
-            return self._run_sync_pipeline_locked(log_callback, progress_callback)
+            # 클라우드 폴더에서 사이트/이력을 먼저 합집합 반영 후 수집
+            self.maybe_backup_pull(log_callback=log_callback)
+            ok = self._run_sync_pipeline_locked(log_callback, progress_callback)
+            self.maybe_backup_push(log_callback=log_callback)
+            return ok
         finally:
             self._process_lock.release()
             self._pipeline_lock.release()

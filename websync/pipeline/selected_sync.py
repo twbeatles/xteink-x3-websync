@@ -108,11 +108,19 @@ def sync_selected_articles(
                 all_ok = bool(upload_results) and all(upload_results.values())
 
                 if any_ok:
+                    batch = []
                     for ip, ok in upload_results.items():
                         if not ok:
                             continue
                         for url, site_name, title in all_urls:
-                            service.db.mark_synced(url, site_name, title, device_ip=ip)
+                            batch.append({
+                                "url": url,
+                                "site_name": site_name,
+                                "title": title,
+                                "device_ip": ip,
+                            })
+                    if batch:
+                        service.db.mark_synced_many(batch)
                     if all_ok:
                         log("🎉 전송 완료!")
                         success_count = actual_work
@@ -149,11 +157,19 @@ def sync_selected_articles(
                 all_ok = bool(upload_results) and all(upload_results.values())
 
                 if any_ok:
+                    batch = []
                     for ip, ok in upload_results.items():
                         if not ok:
                             continue
                         for art in arts:
-                            service.db.mark_synced(art["url"], site_name, art.get("title", ""), device_ip=ip)
+                            batch.append({
+                                "url": art["url"],
+                                "site_name": site_name,
+                                "title": art.get("title", ""),
+                                "device_ip": ip,
+                            })
+                    if batch:
+                        service.db.mark_synced_many(batch)
                     if all_ok:
                         log(f"🎉 [{site_name}] 전송 성공!")
                         success_count += 1
@@ -176,6 +192,10 @@ def sync_selected_articles(
             "actual_work_sites": actual_work,
             "site_errors": 0,
         }
+        try:
+            service.maybe_backup_push(log_callback=log_callback)
+        except Exception as e:
+            service.logger.warning(f"[backup] 선택 동기화 후 내보내기 실패: {e}")
         return overall_ok
     finally:
         service._process_lock.release()

@@ -67,7 +67,14 @@ def test_legacy_migration():
             )
             conn.commit()
         db = SyncHistoryDb(path)
+        # 레거시 * 행은 더 이상 모든 기기에 완료로 취급하지 않음
+        assert not db.is_synced_for_device("https://legacy.com/1", "192.168.0.5")
+        assert db.is_synced("https://legacy.com/1")
+        # 이관 후 해당 기기만 완료
+        n = db.remap_legacy_star_to_device("192.168.0.5")
+        assert n >= 1
         assert db.is_synced_for_device("https://legacy.com/1", "192.168.0.5")
+        assert not db.is_synced_for_device("https://legacy.com/1", "10.0.0.9")
     finally:
         try:
             os.remove(path)
@@ -105,6 +112,62 @@ def test_concurrent_access():
         for t in threads:
             t.join()
         assert db.get_count() == 20
+    finally:
+        _cleanup_db(db, path)
+
+
+def test_export_all_posts_and_import_union():
+    db, path = _make_db()
+    try:
+        db.mark_synced("https://a.com/1", "s1", "t1", device_ip="10.0.0.1")
+        db.mark_synced("https://a.com/1", "s1", "t1", device_ip="10.0.0.2")
+        posts = db.export_all_posts()
+        assert len(posts) == 2
+        assert all("url" in p and "device_ip" in p for p in posts)
+
+        db2, path2 = _make_db()
+        try:
+            # 한쪽만 있는 이력 + 동일 키 갱신
+            db2.mark_synced("https://a.com/1", "old", "old title", device_ip="10.0.0.1")
+            changed = db2.import_posts_union(
+                [
+                    {
+                        "url": "https://a.com/1",
+                        "device_ip": "10.0.0.1",
+                        "site_name": "s1",
+                        "title": "t1-new",
+                        "synced_at": "2099-01-01 00:00:00",
+                    },
+                    {
+                        "url": "https://a.com/1",
+                        "device_ip": "10.0.0.2",
+                        "site_name": "s1",
+                        "title": "t1",
+                        "synced_at": "2026-01-01 00:00:00",
+                    },
+                    {
+                        "url": "https://b.com/2",
+                        "device_ip": "10.0.0.1",
+                        "site_name": "s2",
+                        "title": "tb",
+                        "synced_at": "2026-01-02 00:00:00",
+                    },
+                ]
+            )
+            assert changed >= 2
+            assert db2.is_synced_for_device("https://a.com/1", "10.0.0.1")
+            assert db2.is_synced_for_device("https://a.com/1", "10.0.0.2")
+            assert db2.is_synced_for_device("https://b.com/2", "10.0.0.1")
+            exported = db2.export_all_posts()
+            row = next(
+                p
+                for p in exported
+                if p["url"] == "https://a.com/1" and p["device_ip"] == "10.0.0.1"
+            )
+            assert row["title"] == "t1-new"
+            assert "2099" in (row["synced_at"] or "")
+        finally:
+            _cleanup_db(db2, path2)
     finally:
         _cleanup_db(db, path)
 

@@ -148,12 +148,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             busy_cb = self._ctx.pipeline_busy_callback
             if busy_cb and busy_cb():
-                self._send_json(200, {"message": "⚠️ 동기화가 이미 실행 중입니다."})
+                self._send_json(409, {"ok": False, "message": "⚠️ 동기화가 이미 실행 중입니다."})
                 return
-            msg = "동기화가 백그라운드에서 시작됩니다."
             sync_cb = self._ctx.sync_callback
-            if sync_cb:
-                threading.Thread(target=sync_cb, daemon=True).start()
-            self._send_json(200, {"message": f"✅ {msg}"})
+            if not sync_cb:
+                self._send_json(503, {"ok": False, "message": "동기화 콜백이 설정되지 않았습니다."})
+                return
+
+            # 기동 직전 재확인 (TOCTOU 완화) — 실제 락은 run_sync_pipeline 내부
+            if busy_cb and busy_cb():
+                self._send_json(409, {"ok": False, "message": "⚠️ 동기화가 이미 실행 중입니다."})
+                return
+
+            started = {"ok": False}
+
+            def _run():
+                try:
+                    # sync_cb 가 False 를 반환하면 락 실패/이미 실행 중
+                    result = sync_cb()
+                    started["ok"] = bool(result) if result is not None else True
+                except Exception:
+                    started["ok"] = False
+
+            threading.Thread(target=_run, daemon=True).start()
+            self._send_json(
+                202,
+                {
+                    "ok": True,
+                    "message": "✅ 동기화가 백그라운드에서 시작됩니다.",
+                },
+            )
         else:
             self.send_error(404)

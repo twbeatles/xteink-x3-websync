@@ -147,14 +147,20 @@ def run_sync_pipeline_locked(
                 all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
 
                 if any_ok:
+                    batch = []
                     for ip, ok in upload_results.items():
                         if not ok:
                             continue
                         for art in new_articles:
                             if not service.db.is_synced_for_device(art["url"], ip):
-                                service.db.mark_synced(
-                                    art["url"], name, art.get("title", ""), device_ip=ip
-                                )
+                                batch.append({
+                                    "url": art["url"],
+                                    "site_name": name,
+                                    "title": art.get("title", ""),
+                                    "device_ip": ip,
+                                })
+                    if batch:
+                        service.db.mark_synced_many(batch)
                     if all_ok:
                         log(f"🎉 [{name}] 동기화 완료 및 전송 성공!")
                         success_count += 1
@@ -217,12 +223,20 @@ def run_sync_pipeline_locked(
                 all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
 
                 if any_ok:
+                    batch = []
                     for ip, ok in upload_results.items():
                         if not ok:
                             continue
                         for url, site_name, title in all_new_urls:
                             if not service.db.is_synced_for_device(url, ip):
-                                service.db.mark_synced(url, site_name, title, device_ip=ip)
+                                batch.append({
+                                    "url": url,
+                                    "site_name": site_name,
+                                    "title": title,
+                                    "device_ip": ip,
+                                })
+                    if batch:
+                        service.db.mark_synced_many(batch)
                     if all_ok:
                         log("🎉 일간 합본 동기화 완료 및 전송 성공!")
                         success_count = actual_work_sites

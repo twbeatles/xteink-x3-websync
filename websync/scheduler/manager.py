@@ -32,17 +32,29 @@ class SchedulerManager:
         else:
             return self._register_linux(h_val, m_val)
 
+    @staticmethod
+    def _win_quote(path: str) -> str:
+        """cmd.exe 내부에서 쓸 경로를 큰따옴표로 감쌉니다."""
+        p = (path or "").replace('"', "")
+        return f'"{p}"'
+
+    def build_windows_tr_command(self) -> str:
+        """schtasks /tr 에 넣을 cmd 문자열 (테스트·등록 공용)."""
+        proj = self._win_quote(self.project_dir)
+        if getattr(sys, "frozen", False):
+            script = self._win_quote(self.script_path)
+            return f"cmd.exe /c cd /d {proj} && {script} --sync"
+        python_exe = sys.executable
+        pythonw_exe = python_exe.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw_exe):
+            pythonw_exe = python_exe
+        py = self._win_quote(pythonw_exe)
+        script = self._win_quote(self.script_path)
+        return f"cmd.exe /c cd /d {proj} && {py} {script} --sync"
+
     def _register_windows(self, h_val: int, m_val: int) -> bool:
-        """Windows schtasks 기반 등록"""
-        if getattr(sys, 'frozen', False):
-            # PyInstaller 빌드 환경
-            cmd_target = f'cmd.exe /c "cd /d {self.project_dir} && \\"{self.script_path}\\" --sync"'
-        else:
-            python_exe = sys.executable
-            pythonw_exe = python_exe.replace("python.exe", "pythonw.exe")
-            if not os.path.exists(pythonw_exe):
-                pythonw_exe = python_exe
-            cmd_target = f'cmd.exe /c "cd /d {self.project_dir} && \\"{pythonw_exe}\\" \\"{self.script_path}\\" --sync"'
+        """Windows schtasks 기반 등록 (경로 공백 안전)."""
+        cmd_target = self.build_windows_tr_command()
 
         cmd = [
             "schtasks", "/create",

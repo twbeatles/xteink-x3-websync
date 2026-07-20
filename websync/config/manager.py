@@ -7,8 +7,8 @@ import copy
 import time
 from datetime import datetime
 from websync.core.paths import PROJECT_ROOT, resolve_path
-from websync.config.exceptions import ConfigLoadError, ConfigSaveError
-from websync.config.validator import log_validation_warnings
+from websync.config.exceptions import ConfigLoadError, ConfigSaveError, ConfigConflictError
+from websync.config.validator import log_validation_warnings, validate_config
 
 class ConfigManager:
 
@@ -112,7 +112,20 @@ class ConfigManager:
             "default_upload_path": "/",
             "cleanup_older_days": 14,
             "warn_overwrite": True
-        }
+        },
+        "backup_sync": {
+            "enabled": False,
+            "folder": "",
+            "include_history": True,
+            "auto_export": True,
+            "auto_import_on_start": True,
+            "last_sites_push_at": "",
+            "last_history_push_at": "",
+            "last_sync_at": "",
+            "last_sync_message": "",
+        },
+        # RMW 충돌 감지용 (파일에 저장, UI 비노출)
+        "_config_revision": 0,
     }
 
 
@@ -172,36 +185,75 @@ class ConfigManager:
         opds["api_key"] = secrets.token_urlsafe(16)
         return True
 
+    def _normalize_loaded(self, config: dict) -> tuple[dict, bool]:
+        """로드된 dict에 결손 키 보강. (updated 여부 반환)"""
+        config, updated = self._deep_merge(self.DEFAULT_CONFIG, config)
+
+        if "sites" in config and isinstance(config["sites"], list):
+            merged_sites, sites_updated = self._merge_sites(config["sites"])
+            config["sites"] = merged_sites
+            updated = updated or sites_updated
+
+        if self._ensure_api_token(config):
+            updated = True
+
+        if self._ensure_opds_api_key(config):
+            updated = True
+
+        if config.get("config_version", 0) < self.CONFIG_VERSION:
+            config["config_version"] = self.CONFIG_VERSION
+            updated = True
+
+        if "_config_revision" not in config:
+            config["_config_revision"] = 0
+            updated = True
+
+        return config, updated
+
+    def _read_raw_unlocked(self) -> dict:
+        """락 보유 중 디스크에서 읽고 정규화 (자동 저장 없음)."""
+        if not os.path.exists(self.config_path):
+            cfg = copy.deepcopy(self.DEFAULT_CONFIG)
+            self._ensure_api_token(cfg)
+            self._ensure_opds_api_key(cfg)
+            return cfg
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            if not isinstance(config, dict):
+                raise ConfigLoadError("config.json 최상위는 객체여야 합니다.")
+            config, _ = self._normalize_loaded(config)
+            return config
+        except json.JSONDecodeError as e:
+            corrupt_path = f"{self.config_path}.corrupt"
+            try:
+                shutil.copy2(self.config_path, corrupt_path)
+            except OSError:
+                corrupt_path = None
+            raise ConfigLoadError(
+                f"config.json 파싱 실패: {e}. 손상 파일을 '{corrupt_path}'에 보존했습니다.",
+                corrupt_path=corrupt_path,
+            ) from e
+        except ConfigLoadError:
+            raise
+        except OSError as e:
+            raise ConfigLoadError(f"config.json 읽기 실패: {e}") from e
+
     def load_config(self) -> dict:
         with self._lock:
             if not os.path.exists(self.config_path):
                 cfg = copy.deepcopy(self.DEFAULT_CONFIG)
                 self._ensure_api_token(cfg)
-                self._save_config_unlocked(cfg)
+                self._save_config_unlocked(cfg, bump_revision=False)
                 return cfg
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
 
-                config, updated = self._deep_merge(self.DEFAULT_CONFIG, config)
-
-                if "sites" in config and isinstance(config["sites"], list):
-                    merged_sites, sites_updated = self._merge_sites(config["sites"])
-                    config["sites"] = merged_sites
-                    updated = updated or sites_updated
-
-                if self._ensure_api_token(config):
-                    updated = True
-
-                if self._ensure_opds_api_key(config):
-                    updated = True
-
-                if config.get("config_version", 0) < self.CONFIG_VERSION:
-                    config["config_version"] = self.CONFIG_VERSION
-                    updated = True
+                config, updated = self._normalize_loaded(config)
 
                 if updated:
-                    self._save_config_unlocked(config)
+                    self._save_config_unlocked(config, bump_revision=False)
                 log_validation_warnings(config)
                 return config
 
@@ -218,11 +270,41 @@ class ConfigManager:
             except OSError as e:
                 raise ConfigLoadError(f"config.json 읽기 실패: {e}") from e
 
-    def save_config(self, config_data: dict):
-        with self._lock:
-            self._save_config_unlocked(config_data)
+    def save_config(self, config_data: dict, *, expected_revision: int | None = None):
+        """설정을 원자적으로 저장합니다.
 
-    def _save_config_unlocked(self, config_data: dict):
+        expected_revision 이 주어지면 디스크 revision 과 일치할 때만 저장합니다.
+        불일치 시 ConfigConflictError (disk_config 포함).
+        """
+        with self._lock:
+            if expected_revision is not None:
+                try:
+                    disk = self._read_raw_unlocked()
+                except ConfigLoadError:
+                    disk = copy.deepcopy(self.DEFAULT_CONFIG)
+                disk_rev = int(disk.get("_config_revision") or 0)
+                if disk_rev != int(expected_revision):
+                    raise ConfigConflictError(
+                        f"설정이 다른 작업에 의해 변경되었습니다 "
+                        f"(disk={disk_rev}, expected={expected_revision}).",
+                        disk_config=disk,
+                    )
+            self._save_config_unlocked(config_data, bump_revision=True)
+
+    def update_config(self, mutator) -> dict:
+        """디스크 최신본을 읽어 mutator(config) 적용 후 저장 (RMW 안전).
+
+        mutator: Callable[[dict], None]
+        Returns: 저장된 config
+        """
+        with self._lock:
+            config = self._read_raw_unlocked()
+            mutator(config)
+            self._save_config_unlocked(config, bump_revision=True)
+            log_validation_warnings(config)
+            return config
+
+    def _save_config_unlocked(self, config_data: dict, *, bump_revision: bool = True):
         """락이 이미 잡힌 상태에서 호출하는 내부 저장 전용 함수 (원자적 쓰기).
 
         실패 시 ConfigSaveError를 발생시킵니다.
@@ -230,6 +312,14 @@ class ConfigManager:
         tmp_path = f"{self.config_path}.tmp"
         try:
             config_data.setdefault("config_version", self.CONFIG_VERSION)
+            if bump_revision:
+                try:
+                    rev = int(config_data.get("_config_revision") or 0)
+                except (TypeError, ValueError):
+                    rev = 0
+                config_data["_config_revision"] = rev + 1
+            else:
+                config_data.setdefault("_config_revision", 0)
             directory = os.path.dirname(self.config_path) or "."
             os.makedirs(directory, exist_ok=True)
             bak_path = f"{self.config_path}.bak"
@@ -252,6 +342,10 @@ class ConfigManager:
                 except OSError:
                     pass
             raise ConfigSaveError(f"config.json 저장 실패: {e}") from e
+
+    def get_validation_errors(self, config: dict | None = None) -> list[str]:
+        cfg = config if config is not None else self.load_config()
+        return validate_config(cfg)
 
     def get_resolved_output_dir(self, config: dict | None = None) -> str:
         cfg = config or self.load_config()

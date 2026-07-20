@@ -1,12 +1,14 @@
 """동기화 이력 탭 컴포넌트"""
 import hashlib
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 from websync.gui.widgets import (
     YELLOW_COLOR, create_scrollable_frame, create_scrolled_tree
 )
 from websync.db.history import SyncHistoryDbError
+from websync.backup.atomic_io import read_json_safe, write_json_atomic
+from websync.backup.format import build_history_payload, extract_posts
 
 
 class HistoryTab(ttk.Frame):
@@ -32,6 +34,8 @@ class HistoryTab(ttk.Frame):
         ttk.Button(btn_row, text="🔄 이력 새로고침", command=self._refresh_history).pack(side="left", padx=3)
         ttk.Button(btn_row, text="🗑 선택 항목 삭제 (재전송 허용)", command=self._delete_history_entry).pack(side="left", padx=3)
         ttk.Button(btn_row, text="⚠️ 전체 이력 초기화", command=self._clear_all_history).pack(side="left", padx=3)
+        ttk.Button(btn_row, text="이력 JSON 내보내기", command=self._export_history_json).pack(side="right", padx=3)
+        ttk.Button(btn_row, text="이력 JSON 가져오기", command=self._import_history_json).pack(side="right", padx=3)
 
         self.history_count_label = ttk.Label(ctrl_frame, text="", foreground=YELLOW_COLOR)
         self.history_count_label.pack(anchor="e", padx=10, pady=(4, 0))
@@ -108,6 +112,7 @@ class HistoryTab(ttk.Frame):
             return
         self._refresh_history()
         self.app._log_message(f"🗑 이력 {len(selected)}건 삭제 완료 (재전송 허용)")
+        self.service.schedule_backup_push()
 
     def _clear_all_history(self):
         if not messagebox.askyesno("전체 초기화 확인", "모든 동기화 이력을 삭제합니다.\n다음 동기화 시 모든 기사가 재수집됩니다. 계속할까요?"):
@@ -120,3 +125,48 @@ class HistoryTab(ttk.Frame):
             return
         self._refresh_history()
         self.app._log_message("⚠️ 동기화 이력 전체 초기화 완료")
+        self.service.schedule_backup_push()
+
+    def _export_history_json(self):
+        file_path = filedialog.asksaveasfilename(
+            title="동기화 이력 JSON 내보내기",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+            initialfile="synced_posts.json",
+        )
+        if not file_path:
+            return
+        try:
+            posts = self.db.export_all_posts()
+            write_json_atomic(file_path, build_history_payload(posts))
+            messagebox.showinfo("완료", f"이력 {len(posts)}건을 내보냈습니다.")
+            self.app._log_message(f"☁ 이력 JSON 내보내기: {len(posts)}건 → {file_path}")
+        except Exception as e:
+            messagebox.showerror("내보내기 실패", str(e))
+
+    def _import_history_json(self):
+        file_path = filedialog.askopenfilename(
+            title="동기화 이력 JSON 가져오기",
+            filetypes=[("JSON", "*.json")],
+        )
+        if not file_path:
+            return
+        try:
+            payload = read_json_safe(file_path)
+            posts, _ = extract_posts(payload)
+            if not posts:
+                messagebox.showwarning(
+                    "형식 오류",
+                    "올바른 이력 JSON이 아닙니다. (kind=synced_posts 또는 posts 배열 필요)",
+                )
+                return
+            changed = self.db.import_posts_union(posts)
+            self._refresh_history()
+            self.service.schedule_backup_push()
+            messagebox.showinfo(
+                "완료",
+                f"이력 {len(posts)}건 중 {changed}건을 신규/갱신 반영했습니다. (합집합 병합)",
+            )
+            self.app._log_message(f"☁ 이력 JSON 가져오기: {changed}건 반영 ← {file_path}")
+        except Exception as e:
+            messagebox.showerror("가져오기 실패", str(e))

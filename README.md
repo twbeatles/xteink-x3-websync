@@ -9,7 +9,7 @@ Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 
 ## 주요 기능 ✨
 
 1. **다중 사이트 뉴스 수집 및 EPUB 빌드**
-   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe` (카페), `naver_post` (포스트) 등
+   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe`, `naver_post`, `soonsal`, `moneyletter` 등
    - 사이트별 이미지 포함/제거, 번역, AI 요약(선택) 지원
    - SQLite 이력 DB로 증분 동기화 (중복 전송 방지)
    - e-ink 최적화 한국어 EPUB 생성 (표지 자동 생성 옵션)
@@ -19,6 +19,8 @@ Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 
 2. **뉴스 프리뷰 및 선택 전송** (H1) — 동기화 버튼 옆에 위치한 뉴스 프리뷰를 통해 신규 기사들을 확인하고, 전송을 원하는 기사만 체크하여 기기로 즉시 전송할 수 있는 선택 동기화 지원
 
 3. **사이트 설정 Import/Export** (M5) — 대량의 뉴스 구독 사이트 리스트를 간편하게 가져오고 내보낼 수 있는 JSON 백업 백포팅 기능 지원
+
+3b. **클라우드 백업 동기화** — OneDrive 등 폴더에 `sites.json` + `synced_posts.json` 미러. 여러 PC에서 사이트 구독·전송 이력을 합집합으로 유지 (기기 IP·API 키 제외)
 
 4. **Calibre 서재 무선 연동** — `calibredb.exe`로 도서 목록 조회·다중 선택 전송
 
@@ -50,10 +52,11 @@ xteink-x3-websync/
 │   ├── core/                  # paths, article, logger, types
 │   ├── config/                # ConfigManager, validator
 │   ├── db/                    # SyncHistoryDb
-│   ├── scrapers/              # 9종 스크래퍼 + factory
+│   ├── scrapers/              # 11종 스크래퍼 + factory
 │   ├── epub/                  # builder + css/cover/sanitize + themes/
 │   ├── upload/                # host, remote_path, uploader, device_client
 │   ├── pipeline/              # service 파사드 + sync/preview/selected runners
+│   ├── backup/                # 클라우드 백업 동기화 (sites.json + synced_posts.json)
 │   ├── integrations/          # CalibreManager, ToastNotifier
 │   ├── scheduler/             # SchedulerManager
 │   ├── servers/               # OPDS + dashboard/ 패키지 (templates 포함)
@@ -69,7 +72,8 @@ xteink-x3-websync/
 | `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅, TypedDict 정의 |
 | `websync.config` | `config.json` CRUD, 스키마 유효성 검증 |
 | `websync.pipeline` | 동기화 파사드 + 프리뷰/선택 전송/합본 러너 분리 |
-| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post 등 + 팩토리 |
+| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post/soonsal/moneyletter 등 + 팩토리 |
+| `websync.backup` | OneDrive 등 클라우드 폴더용 sites/이력 JSON 미러 (pull·push·합집합) |
 | `websync.epub` | EPUB 빌더 (CSS·표지·정제 모듈 분리) |
 | `websync.upload` | 업로드 + CrossPoint 파일 관리 API 클라이언트 |
 | `websync.db` | SQLite 동기화 이력 |
@@ -107,7 +111,7 @@ python x3_websync.py --sync
 - **동시 실행**: GUI 수동 동기화와 스케줄 `--sync`는 프로세스 파일 락으로 직렬화됩니다
 
 ### 보안·프라이버시 참고
-- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수; Bearer/`X-Api-Key` 권장)
+- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수; Bearer/`X-Api-Key` 권장. 쿼리 `?api_key=` 는 기본 비활성, `X3_OPDS_ALLOW_QUERY_API_KEY=1` 로만 허용)
 - **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만 LAN 공개 사용
 - **AI 요약·번역**: 활성화 시 기사 본문이 외부 API(OpenAI 등)로 전송될 수 있음. API 키는 `config.json`에 로컬 저장
 

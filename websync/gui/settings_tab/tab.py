@@ -21,6 +21,7 @@ from websync.gui.settings_tab.epub_settings import SettingsEpubMixin
 from websync.gui.settings_tab.servers import SettingsServersMixin
 from websync.gui.settings_tab.watch import SettingsWatchMixin
 from websync.gui.settings_tab.ai_translation import SettingsAiTranslationMixin
+from websync.gui.settings_tab.backup_sync import SettingsBackupSyncMixin
 
 
 class SettingsTab(
@@ -28,6 +29,7 @@ class SettingsTab(
     SettingsServersMixin,
     SettingsWatchMixin,
     SettingsAiTranslationMixin,
+    SettingsBackupSyncMixin,
     ttk.Frame,
 ):
     """서버 제어 및 AI, 번역, 합본, 테마 등 고급 설정을 담당하는 탭"""
@@ -172,7 +174,10 @@ class SettingsTab(
         ttk.Button(trans_frame, text="저장", command=self._save_trans_settings).grid(row=0, column=3, padx=10, pady=6)
         ttk.Label(trans_frame, text="※ googletrans: 사이트별 '번역'만 설정해도 동작. libretranslate: 전역 활성화 필요.", font=("Malgun Gothic", 8), foreground=HINT_COLOR).grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 6), sticky="w")
 
-        # 6. 로그 폴더 열기
+        # 6. 클라우드 백업 동기화 (OneDrive 등)
+        self._build_backup_sync_section(body)
+
+        # 7. 로그 폴더 열기
         log_frame = ttk.LabelFrame(body, text=" 📂 로그 파일 ")
         log_frame.pack(fill="x", padx=15, pady=5)
         ttk.Button(log_frame, text="📂 로그 폴더 열기", command=self._open_log_folder).pack(side="left", padx=10, pady=8)

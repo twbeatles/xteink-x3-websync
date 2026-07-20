@@ -53,10 +53,12 @@ class OPDSHandler(BaseHTTPRequestHandler):
         api_header = self.headers.get("X-Api-Key", "")
         if self._token_ok(api_header):
             return True
-        # 하위 호환: 쿼리 api_key (로그 유출 위험 — 비권장)
-        qs = parse_qs(urlparse(self.path).query)
-        if self._token_ok(qs.get("api_key", [None])[0]):
-            return True
+        # 쿼리 api_key 는 로그 유출 위험으로 기본 비활성.
+        # 환경변수 X3_OPDS_ALLOW_QUERY_API_KEY=1 일 때만 하위 호환 허용.
+        if os.environ.get("X3_OPDS_ALLOW_QUERY_API_KEY", "").strip() in ("1", "true", "yes"):
+            qs = parse_qs(urlparse(self.path).query)
+            if self._token_ok(qs.get("api_key", [None])[0]):
+                return True
         self.send_error(401, "Unauthorized")
         return False
 

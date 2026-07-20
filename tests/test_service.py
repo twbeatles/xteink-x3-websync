@@ -104,23 +104,27 @@ def test_pipeline_partial_upload_marks_only_successful_devices():
     svc = SyncService(cm)
     svc.db.needs_sync = MagicMock(return_value=True)
     svc.db.is_synced_for_device = MagicMock(return_value=False)
-    svc.db.mark_synced = MagicMock()
+    svc.db.mark_synced_many = MagicMock(return_value=1)
     with patch.object(svc, "_reload_config"):
-        with patch.object(ScraperFactory, "get_scraper") as mock_get:
-            mock_get.return_value.fetch_articles.return_value = [
-                {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
-            ]
-            with patch.object(svc.epub_builder, "build", return_value="/tmp/test.epub"):
-                with patch.object(
-                    svc.uploader,
-                    "upload_to_targets",
-                    return_value={"127.0.0.1": True, "10.0.0.2": False},
-                ) as mock_upload:
-                    with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
-                        result = svc.run_sync_pipeline()
+        with patch.object(svc, "maybe_backup_pull", return_value={"skipped": True}):
+            with patch.object(svc, "maybe_backup_push", return_value={"skipped": True}):
+                with patch.object(ScraperFactory, "get_scraper") as mock_get:
+                    mock_get.return_value.fetch_articles.return_value = [
+                        {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
+                    ]
+                    with patch.object(svc.epub_builder, "build", return_value="/tmp/test.epub"):
+                        with patch.object(
+                            svc.uploader,
+                            "upload_to_targets",
+                            return_value={"127.0.0.1": True, "10.0.0.2": False},
+                        ) as mock_upload:
+                            with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+                                result = svc.run_sync_pipeline()
     assert result is False
-    svc.db.mark_synced.assert_called_once()
-    assert svc.db.mark_synced.call_args.kwargs["device_ip"] == "127.0.0.1"
+    svc.db.mark_synced_many.assert_called_once()
+    entries = svc.db.mark_synced_many.call_args.args[0]
+    assert len(entries) == 1
+    assert entries[0]["device_ip"] == "127.0.0.1"
     # only_ips 에 미전송 기기 전달
     assert mock_upload.call_args.kwargs.get("only_ips") == ["127.0.0.1", "10.0.0.2"]
 
@@ -142,23 +146,26 @@ def test_pipeline_skips_already_synced_device_on_retry():
         return ip == "10.0.0.1"
 
     svc.db.is_synced_for_device = MagicMock(side_effect=synced_side)
-    svc.db.mark_synced = MagicMock()
+    svc.db.mark_synced_many = MagicMock(return_value=1)
     with patch.object(svc, "_reload_config"):
-        with patch.object(ScraperFactory, "get_scraper") as mock_get:
-            mock_get.return_value.fetch_articles.return_value = [
-                {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
-            ]
-            with patch.object(svc.epub_builder, "build", return_value="/tmp/test.epub"):
-                with patch.object(
-                    svc.uploader,
-                    "upload_to_targets",
-                    return_value={"10.0.0.2": True},
-                ) as mock_upload:
-                    with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
-                        result = svc.run_sync_pipeline()
+        with patch.object(svc, "maybe_backup_pull", return_value={"skipped": True}):
+            with patch.object(svc, "maybe_backup_push", return_value={"skipped": True}):
+                with patch.object(ScraperFactory, "get_scraper") as mock_get:
+                    mock_get.return_value.fetch_articles.return_value = [
+                        {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
+                    ]
+                    with patch.object(svc.epub_builder, "build", return_value="/tmp/test.epub"):
+                        with patch.object(
+                            svc.uploader,
+                            "upload_to_targets",
+                            return_value={"10.0.0.2": True},
+                        ) as mock_upload:
+                            with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+                                result = svc.run_sync_pipeline()
     assert result is True
     assert mock_upload.call_args.kwargs.get("only_ips") == ["10.0.0.2"]
-    assert svc.db.mark_synced.call_args.kwargs["device_ip"] == "10.0.0.2"
+    entries = svc.db.mark_synced_many.call_args.args[0]
+    assert entries[0]["device_ip"] == "10.0.0.2"
 
 
 def test_pipeline_all_empty_fetch_returns_false():
