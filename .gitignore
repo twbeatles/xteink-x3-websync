@@ -1,13 +1,23 @@
 # X3 WebSync Git Ignore
 
-# Local Config / secrets
+# Local Config / secrets / backups
 config.json
+config.json.bak
+*.json.bak
+.env
+.env.*
+*.local
 
-# Epub Output
+# Epub Output & validation dumps
 output/
+*.epub
 
 # Local DB & Logs
 sync_history.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 logs/
 *.log
 
@@ -26,6 +36,7 @@ logs/
 htmlcov/
 .tox/
 .hypothesis/
+.cache/
 
 # Virtual Environments
 .venv/
@@ -37,12 +48,14 @@ env/
 build/
 dist/
 *.spec.bak
+# keep x3_websync.spec tracked
 
 # IDE / editor
 .idea/
 .vscode/
 *.swp
 *~
+*.code-workspace
 
 # OS Files
 .DS_Store
@@ -55,6 +68,8 @@ mcps/
 .codegraph/
 .zcode/
 .grok/
+.cursor/
 
-# One-off local refactor helper scripts (optional; keep if committed intentionally)
-# scripts/_refactor_*.py
+# Debug one-off scripts (local only; do not commit)
+scripts/_debug_*.py
+scripts/_tmp_*.py

@@ -1,148 +1,119 @@
-# Xteink X3 WebSync Manager 🚀
+# Xteink X3 WebSync Manager
 
-Xteink X3 (CrossPoint 펌웨어 기반) e-ink 리더기를 위한 통합 뉴스 스크래핑 및 Calibre 라이브러리 무선 동기화 GUI 매니저 툴입니다.
+Xteink X3(e-ink 리더기)에 **뉴스·블로그를 EPUB으로 모아 무선 전송**하는 PC용 프로그램입니다.
 
-기존의 단일 웹 크롤링 스크립트를 **SOLID 원칙**에 맞춰 모듈별로 분리·재설계하여 유지보수성과 확장성을 높였습니다.
-
----
-
-## 주요 기능 ✨
-
-1. **다중 사이트 뉴스 수집 및 EPUB 빌드**
-   - 스크래퍼: `css`, `rss`, `naver`, `tistory`, `brunch`, `youtube`, `substack`, `naver_cafe`, `naver_post`, `soonsal`, `moneyletter` 등
-   - 사이트별 이미지 포함/제거, 번역, AI 요약(선택) 지원
-   - SQLite 이력 DB로 증분 동기화 (중복 전송 방지)
-   - e-ink 최적화 한국어 EPUB 생성 (표지 자동 생성 옵션)
-   - **EPUB 병합 방식 설정** (M4): 사이트별 개별 EPUB 발행 또는 하루치의 모든 기사를 한 권으로 합치는 **일간 합본(Daily Digest)** 발행 모드 지원
-   - **EPUB CSS 테마 커스텀** (M7): `default`, `serif_classic`, `sans_modern`, `dark_eink` 프리셋 제공 및 `custom.css` 외부 연동 지원
-
-2. **뉴스 프리뷰 및 선택 전송** (H1) — 동기화 버튼 옆에 위치한 뉴스 프리뷰를 통해 신규 기사들을 확인하고, 전송을 원하는 기사만 체크하여 기기로 즉시 전송할 수 있는 선택 동기화 지원
-
-3. **사이트 설정 Import/Export** (M5) — 대량의 뉴스 구독 사이트 리스트를 간편하게 가져오고 내보낼 수 있는 JSON 백업 백포팅 기능 지원
-
-3b. **클라우드 백업 동기화** — OneDrive 등 폴더에 `sites.json` + `synced_posts.json` 미러. 여러 PC에서 사이트 구독·전송 이력을 합집합으로 유지 (기기 IP·API 키 제외)
-
-4. **Calibre 서재 무선 연동** — `calibredb.exe`로 도서 목록 조회·다중 선택 전송
-
-5. **로컬 파일 직접 무선 전송** — EPUB/PDF/MOBI/TXT
-
-6. **다중 X3 기기 동시 전송** — GUI에서 추가 기기 등록
-
-7. **자동 스케줄러** — Windows `schtasks` / macOS `launchd` / Linux `crontab`
-
-8. **동기화 이력 탭** — 전송 이력 조회·삭제(재전송 허용)
-
-9. **OPDS 카탈로그 서버** — 생성 EPUB 브라우징 (기본 localhost)
-
-10. **웹 대시보드** — 브라우저에서 동기화 트리거·로그 확인 (API 토큰 인증, 템플릿 파일화 완료)
-
-11. **Calibre Watch** — 폴더 감시 후 신규 파일 자동 전송
-
-12. **실행 로그** — `logs/sync_YYYY-MM-DD.log` 자동 저장
-
+매일 아침 지정한 사이트를 자동 수집하고, 이미 보낸 글은 건너뛰며, Calibre 서재 책도 같은 방식으로 보낼 수 있습니다.
 
 ---
 
-## 프로젝트 모듈 구성 🏗️
+## 이런 분들께
 
-```
-xteink-x3-websync/
-├── x3_websync.py              # 진입점 (CLI/GUI, 단일 인스턴스 락)
-├── websync/                   # 메인 패키지 (SOLID 기반 모듈 분리)
-│   ├── core/                  # paths, article, logger, types
-│   ├── config/                # ConfigManager, validator
-│   ├── db/                    # SyncHistoryDb
-│   ├── scrapers/              # 11종 스크래퍼 + factory
-│   ├── epub/                  # builder + css/cover/sanitize + themes/
-│   ├── upload/                # host, remote_path, uploader, device_client
-│   ├── pipeline/              # service 파사드 + sync/preview/selected runners
-│   ├── backup/                # 클라우드 백업 동기화 (sites.json + synced_posts.json)
-│   ├── integrations/          # CalibreManager, ToastNotifier
-│   ├── scheduler/             # SchedulerManager
-│   ├── servers/               # OPDS + dashboard/ 패키지 (templates 포함)
-│   ├── watch/                 # CalibreWatcher
-│   └── gui/                   # app_core, sync_tab, device_files, settings_tab …
-├── tests/                     # pytest 단위·통합 테스트
-└── scripts/                   # 마이그레이션·검증 스크립트
-```
-
-| 패키지/모듈 | 역할 |
-|-------------|------|
-| `x3_websync.py` | 진입점 — `websync.*` 패키지 로드 |
-| `websync.core` | 프로젝트 루트 경로, 기사 URL 유틸, 파일 로깅, TypedDict 정의 |
-| `websync.config` | `config.json` CRUD, 스키마 유효성 검증 |
-| `websync.pipeline` | 동기화 파사드 + 프리뷰/선택 전송/합본 러너 분리 |
-| `websync.scrapers` | css/rss/naver/tistory/brunch/youtube/substack/naver_cafe/naver_post/soonsal/moneyletter 등 + 팩토리 |
-| `websync.backup` | OneDrive 등 클라우드 폴더용 sites/이력 JSON 미러 (pull·push·합집합) |
-| `websync.epub` | EPUB 빌더 (CSS·표지·정제 모듈 분리) |
-| `websync.upload` | 업로드 + CrossPoint 파일 관리 API 클라이언트 |
-| `websync.db` | SQLite 동기화 이력 |
-| `websync.gui` | Tkinter GUI (탭·앱 코어 패키지화) |
-| `websync.scheduler` | 크로스플랫폼 스케줄러 |
-| `websync.servers` | OPDS·웹 대시보드 (`servers/dashboard/`) |
-| `websync.watch` | Calibre 폴더 감시 |
+- 네이버 블로그, 티스토리, 브런치, Velog, 뉴닉, RSS 등을 e-ink에서 읽고 싶을 때  
+- Calibre 책을 Wi-Fi로 바로 기기에 넣고 싶을 때  
+- 매일 정해진 시간에 자동으로 새 글만 받고 싶을 때  
 
 ---
 
-## 사용 방법 💡
+## 준비물
 
-### 설치
+1. **PC** — Windows 권장 (macOS/Linux도 소스 실행 가능)
+2. **X3 기기** — PC와 **같은 Wi-Fi**, CrossPoint 펌웨어
+3. 기기 **IP 주소** 또는 `crosspoint.local`
+4. (선택) **Calibre** — 서재 연동 시
+
+---
+
+## 빠른 시작
+
+### 1) 실행
+
+**EXE (Windows)**  
+`x3_websync.exe`를 더블클릭합니다.  
+같은 폴더에 설정·로그·EPUB이 만들어집니다.
+
+**Python**
+
 ```bash
 pip install -r requirements.txt
-```
-
-### 실행
-```bash
 python x3_websync.py
 ```
 
-### 백그라운드 동기화 (스케줄러용)
+### 2) 기기 연결
+
+1. 프로그램을 켠 뒤 **뉴스 동기화** 탭에서 X3 주소를 입력합니다.  
+2. 연결 확인이 되면 다음 단계로 진행합니다.
+
+### 3) 사이트 등록
+
+1. **사이트 추가**를 누릅니다.  
+2. **추천 프리셋**에서 Velog·뉴닉·기술 블로그 등을 고르거나, 직접 URL을 넣습니다.  
+3. 저장 후 목록에서 활성(켜짐) 상태인지 확인합니다.
+
+### 4) 동기화
+
+- **전체 동기화** — 새 글을 모아 EPUB으로 만들고 기기로 전송  
+- **뉴스 프리뷰** — 목록을 보고 원하는 글만 전송  
+
+이미 보낸 글은 이력에 남아 **다시 보내지 않습니다.**
+
+### 5) (선택) 매일 자동 실행
+
+**뉴스 동기화** 탭에서 스케줄을 켜면, 지정한 시각에 백그라운드로 동기화합니다.
+
+스케줄러용 명령:
+
 ```bash
 python x3_websync.py --sync
 ```
 
-### 기본 설정
-- **X3 주소**: Wi-Fi IP 또는 `crosspoint.local`
-- **추가 기기**: GUI에서 다중 기기 등록 (IP·표시 이름 중복 불가)
-- **기기 파일 관리**: GUI **📁 기기 파일** 탭 — 목록·삭제·폴더 생성·이름 변경·이동·PC 다운로드·현재 폴더 업로드·오래된 동기화 EPUB 정리. 기본 업로드 경로(`device_files.default_upload_path`)는 뉴스/Calibre 전송에도 적용 (기기가 **File Transfer** / Calibre Wireless 모드일 때)
-- **웹 대시보드**: `config.json`의 `web_dashboard.api_token`으로 인증 (자동 생성, 세션 약 7일)
-- **동기화 이력**: URL·기기(`device_ip`) 단위 — 성공 기기만 이력 기록
-- **부분 재시도**: 다음 동기화 시 **아직 받지 못한 기기만** 재업로드 (이미 성공한 기기는 스킵)
-- **동시 실행**: GUI 수동 동기화와 스케줄 `--sync`는 프로세스 파일 락으로 직렬화됩니다
+---
 
-### 보안·프라이버시 참고
-- **OPDS localhost**: 기본은 인증 없이 로컬 EPUB 제공 (LAN 공개 시 API 키 필수; Bearer/`X-Api-Key` 권장. 쿼리 `?api_key=` 는 기본 비활성, `X3_OPDS_ALLOW_QUERY_API_KEY=1` 로만 허용)
-- **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만 LAN 공개 사용
-- **AI 요약·번역**: 활성화 시 기사 본문이 외부 API(OpenAI 등)로 전송될 수 있음. API 키는 `config.json`에 로컬 저장
+## 할 수 있는 일 (한눈에)
+
+| 기능 | 설명 |
+|------|------|
+| 뉴스·블로그 수집 | 네이버, 티스토리, 브런치, Velog, 뉴닉, RSS 등 → EPUB |
+| 선택 전송 | 프리뷰에서 원하는 기사만 보내기 |
+| 중복 방지 | 기기별로 이미 보낸 글 건너뛰기 |
+| Calibre / 로컬 파일 | 서재 책·EPUB 등을 무선 전송 |
+| 여러 기기 | 기기 여러 대에 동시 전송 |
+| 기기 파일 탭 | 기기 안 파일 목록·삭제·이동·정리 |
+| 예약 실행 | 매일 자동 동기화 |
+| 웹·OPDS (선택) | 브라우저·OPDS 클라이언트로 접근 |
+
+지원 사이트 종류·설정 옵션은 [사용자 가이드](docs/USER_GUIDE.md)를 보세요.
 
 ---
 
-## 환경 요구사항 📦
+## 더 자세한 문서
 
-- Python 3.10+
-- 필수: `beautifulsoup4`, `ebooklib`, `requests`, `lxml`
-- 선택: `Pillow`(표지), `googletrans`(번역), `youtube-transcript-api`, `watchdog`(폴더 감시)
-- Calibre 연동 시 로컬 PC에 Calibre 설치 필요
+| 문서 | 내용 |
+|------|------|
+| [**사용자 가이드**](docs/USER_GUIDE.md) | 화면 설명, 사이트 유형, 탭별 사용법, 문제 해결 |
+| [**개발자 가이드**](docs/DEVELOPER.md) | 폴더 구조, 모듈 역할, 테스트, EXE 빌드 |
+| [기능 제안·로드맵](docs/FEATURE_PROPOSALS.md) | 향후 아이디어 |
+| [프로젝트 감사](docs/PROJECT_AUDIT.md) | 구현 상태 점검 (개발용) |
 
-### 테스트
+내부 아키텍처·확장 방법은 저장소 루트의 `CLAUDE.md`에도 정리되어 있습니다.
+
+---
+
+## 환경
+
+- **Python** 3.10 이상 (소스 실행 시)
+- 필수 패키지: `requirements.txt`
+- 선택 기능(표지·번역·YouTube·폴더 감시): `requirements-optional.txt`
+- Calibre 연동 시 PC에 Calibre 설치 필요
+
 ```bash
+# 테스트 (개발)
 python -m pytest tests/ -q
 ```
-단위·통합 테스트 (`pytest tests/`) — pipeline, db, servers, uploader, paths, process_lock, epub 등.
 
-### Windows EXE 빌드 (PyInstaller)
-```bash
-pip install pyinstaller
-pyinstaller x3_websync.spec
-```
-빌드 결과물: `dist/x3_websync.exe` (GUI 모드, 콘솔 없음)
+---
 
-**EXE 빌드 시 제외되는 선택 기능** (`x3_websync.spec` excludes):
-| 기능 | 제외 패키지 | 소스 실행 시 |
-|------|-------------|--------------|
-| EPUB 표지 이미지 | Pillow | `requirements-optional.txt` |
-| YouTube 자막 | youtube-transcript-api | 동일 |
-| Calibre Watch | watchdog | 동일 |
-| googletrans 번역 | googletrans | 동일 |
+## 라이선스·주의
 
-EXE는 실행 파일과 같은 폴더에 `config.json` / `sync_history.db` / `logs` / `output`을 둡니다.
+- 공개 페이지·공식 RSS 중심으로 수집합니다. 사이트 이용약관·저작권을 지켜 주세요.  
+- 로그인 전용·페이월 콘텐츠는 지원하지 않습니다.  
+- AI 요약·번역을 켜면 기사 내용이 외부 API로 전송될 수 있습니다.

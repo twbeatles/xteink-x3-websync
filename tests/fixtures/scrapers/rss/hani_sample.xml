@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>한겨레 샘플</title>
+    <item>
+      <title>한겨레 픽스처 뉴스 제목입니다</title>
+      <link>https://www.hani.co.kr/arti/fixture.html</link>
+      <description><![CDATA[<table><tr><td><img src="thumb.jpg"/></td></tr></table>]]></description>
+    </item>
+  </channel>
+</rss>

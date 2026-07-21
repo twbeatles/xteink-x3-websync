@@ -35,10 +35,11 @@ xteink-x3-websync/
 │   ├── db/
 │   │   └── history.py         # SQLite 동기화 이력 — timeout=10.0
 │   ├── scrapers/
-│   │   ├── base.py            # BaseScraper, 공통 유틸
-│   │   ├── css.py / rss.py / naver.py / tistory.py / brunch.py / youtube.py / substack.py / …
-│   │   ├── soonsal.py / moneyletter.py
-│   │   └── factory.py         # ScraperFactory (OCP: register_scraper) — 11종
+│   │   ├── base.py / types.py / presets.py   # 공통·타입 상수·한국 추천 프리셋
+│   │   ├── css.py / rss.py / velog.py / naver.py / tistory.py / brunch.py / newneek.py
+│   │   ├── youtube.py / substack.py / naver_cafe.py / naver_post.py
+│   │   ├── soonsal.py / moneyletter.py / newsletter_base.py
+│   │   └── factory.py         # ScraperFactory — 13종 (SCRAPER_TYPES 공유)
 │   ├── epub/
 │   │   ├── builder.py         # EPUB 빌더 파사드
 │   │   ├── css.py / cover.py / sanitize.py  # CSS·표지·본문 정제 (SRP)
@@ -96,10 +97,11 @@ xteink-x3-websync/
 ├── .github/workflows/test.yml # CI: pytest
 ├── README.md / CLAUDE.md
 ├── PROJECT_AUDIT.md           # 최신 기능 구현 감사 (루트)
-├── docs/                  # 상세 문서 (USER_GUIDE, FEATURE_PROPOSALS 등)
-│   ├── USER_GUIDE.md
+├── docs/                      # 사용자·개발 문서
+│   ├── USER_GUIDE.md          # 사용 설명서
+│   ├── DEVELOPER.md           # 모듈·테스트·빌드·스크래퍼 검증
 │   ├── FEATURE_PROPOSALS.md
-│   └── PROJECT_AUDIT.md       # 구버전 감사 — 최신은 루트 PROJECT_AUDIT.md 참고
+│   └── PROJECT_AUDIT.md       # 구버전 감사 — 최신은 루트 PROJECT_AUDIT.md
 ├── pyrightconfig.json
 └── .gitignore
 ```
@@ -164,7 +166,7 @@ main()
   "sites": [
     {
       "name": "사이트명",
-      "type": "css | rss | naver | tistory | brunch | youtube | substack | …",
+      "type": "css | rss | velog | naver | tistory | brunch | newneek | youtube | substack | …",
       "url": "https://...",
       "item_selector": ".post-item",
       "title_selector": ".post-title",
@@ -231,8 +233,13 @@ run_sync_pipeline()
 | `CssSelectorScraper` | `"css"` | CSS 선택자; 옵션 `fetch_detail_page` 시 상세 URL 본문 |
 | `RssScraper` | `"rss"` | RSS/Atom XML 파싱 |
 | `NaverBlogScraper` | `"naver"` | RSS 리스팅 + PostView.naver iframe 우회 |
+| `VelogScraper` | `"velog"` | 프로필 URL → Velog RSS 래퍼 |
 | `TistoryScraper` 등 | tistory/brunch/youtube/substack 등 | 전용 수집; 개별 스킵 통계·전량 실패 시 예외 |
-| `ScraperFactory` | — | `.get_scraper(type)` / `.register_scraper()` |
+| `NewneekScraper` | `"newneek"` | 사이트맵 + `__NEXT_DATA__` 본문 |
+| `NaverCafeScraper` | `"naver_cafe"` | 공개 카페 clubid + article API |
+| `NaverPostScraper` | `"naver_post"` | **서비스 종료** — 명확한 예외 |
+| `SoonsalScraper` / `MoneyLetterScraper` | soonsal / moneyletter | 뉴스레터 아카이브 |
+| `ScraperFactory` | — | `.get_scraper(type)` / `SCRAPER_TYPES` (13종) |
 
 **NaverBlogScraper 특이사항**:
 - 블로그 ID 추출: `blog.naver.com/ID`, `m.blog.naver.com/ID`, `ID.blog.me` 세 가지 주소 형식 지원
@@ -364,7 +371,7 @@ run_sync_pipeline()
 
 ## 5. 기능 확장 아이디어 (Feature Roadmap)
 
-> **참고 (2026-07-13)**: 아래 HIGH/MEDIUM 항목 중 상당수(로그, 진행률, 이력 탭, 전용 스크래퍼, AI 요약, 표지, 번역, OPDS, 다중 기기, Watch, 웹 대시보드, frozen 경로·프로세스 락 등)는 **이미 구현**되었습니다. 신규 작업 전 `docs/PROJECT_AUDIT.md`와 코드 현황을 확인하세요. 아래 목록은 초기 로드맵 기록으로 유지합니다.
+> **참고 (2026-07-13)**: 아래 HIGH/MEDIUM 항목 중 상당수(로그, 진행률, 이력 탭, 전용 스크래퍼, AI 요약, 표지, 번역, OPDS, 다중 기기, Watch, 웹 대시보드, frozen 경로·프로세스 락 등)는 **이미 구현**되었습니다. 신규 작업 전 루트 `PROJECT_AUDIT.md`와 `docs/DEVELOPER.md`·코드 현황을 확인하세요. 아래 목록은 초기 로드맵 기록으로 유지합니다.
 
 현재 아키텍처는 SOLID 원칙 기반으로 설계되어 있어 아래 기능들을 비교적 깔끔하게 추가할 수 있습니다.
 
@@ -465,7 +472,7 @@ run_sync_pipeline()
 
 ## 6. 새 스크래퍼 추가 방법 (개발 가이드)
 
-`websync/scrapers/`에 새 스크래퍼를 추가하는 것은 4단계면 충분합니다.
+`websync/scrapers/`에 새 스크래퍼를 추가할 때 **타입 상수 한곳**을 기준으로 맞춥니다.
 
 ```python
 # 1. websync/scrapers/my_type.py — BaseScraper 상속
@@ -475,15 +482,17 @@ class MyScraper(BaseScraper):
     def fetch_articles(self, site_config: dict) -> list:
         return [{"title": "제목", "content": "<p>본문HTML</p>", "url": "고유URL"}]
 
-# 2. websync/scrapers/factory.py — _scrapers dict에 등록
-from websync.scrapers.my_type import MyScraper
-_scrapers["my_type"] = MyScraper()
+# 2. websync/scrapers/types.py — SCRAPER_TYPES 튜플에 "my_type" 추가
+#    (SPECIALIZED_TYPES 는 css 제외 전용 타입 — GUI CSS 필드 비활성에 사용)
 
-# 3. websync/gui/sync_tab/sites.py — type_cb Combobox values + on_type_change에 추가
-type_cb = ttk.Combobox(..., values=[..., "my_type"], ...)
-# on_type_change disabled tuple에도 추가
+# 3. websync/scrapers/factory.py — import + _scrapers["my_type"] = MyScraper()
 
-# 4. validator.py valid_types + x3_websync.spec hiddenimports 반영
+# 4. (선택) websync/scrapers/presets.py — 한국 추천 프리셋 항목
+
+# 5. x3_websync.spec hiddenimports 에 websync.scrapers.my_type 추가
+
+# 6. 픽스처 단위 테스트 + (선택) scripts/validate_korean_scrapers.py 샘플
+#    GUI combobox / validator 는 SCRAPER_TYPES 를 import 하므로 별도 하드코딩 불필요
 ```
 
 반환 형식 (모든 스크래퍼 공통):
@@ -494,6 +503,8 @@ type_cb = ttk.Combobox(..., values=[..., "my_type"], ...)
     "url": str        # 중복 제거 키
 }
 ```
+
+사용자 문서: `docs/USER_GUIDE.md` · 개발 요약: `docs/DEVELOPER.md` · 빠른 시작: `README.md`
 
 ---
 

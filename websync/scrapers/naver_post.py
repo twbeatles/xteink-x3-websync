@@ -1,41 +1,74 @@
 """네이버 포스트(post.naver.com) 전용 스크래퍼
 
-URL 형식: https://post.naver.com/my.naver?memberNo={id}
+⚠️ 네이버 포스트 서비스는 2025-04-30에 종료되었습니다.
+   신규 수집은 불가하며, 호출 시 명확한 예외를 발생시킵니다.
+   타입은 하위 호환(설정 파일)을 위해 유지합니다.
+
+과거 URL 형식: https://post.naver.com/my.naver?memberNo={id}
 """
-import re
+from __future__ import annotations
+
 from bs4 import BeautifulSoup
-from websync.scrapers.base import BaseScraper, HEADERS, maybe_strip_images, fetch_url
-from websync.scrapers.naver_common import clean_naver_content
+
 from websync.core.logger import get_logger
+from websync.scrapers.base import BaseScraper, fetch_url, maybe_strip_images
+from websync.scrapers.naver_common import clean_naver_content
 
 
 class NaverPostScraper(BaseScraper):
-    """네이버 포스트 스크래퍼"""
+    """네이버 포스트 스크래퍼 (서비스 종료)."""
+
+    SERVICE_ENDED_MSG = (
+        "네이버 포스트(post.naver.com) 서비스는 2025년 4월 30일 종료되어 "
+        "더 이상 글을 수집할 수 없습니다. "
+        "네이버 블로그(type=naver) 또는 RSS/다른 소스를 이용해 주세요."
+    )
+
     def __init__(self):
         self.logger = get_logger()
-        self.last_fetch_stats = {}
+        self.last_fetch_stats: dict = {}
 
     def fetch_articles(self, site_config: dict) -> list:
-        url = site_config.get("url", "").strip()
-        limit = site_config.get("limit", 5)
+        url = (site_config.get("url") or "").strip()
         self.last_fetch_stats = {"skipped": 0}
 
-        articles = []
+        # 종료 안내 페이지 여부 확인 (오프라인/아카이브 대비 레거시 파싱 시도는 하지 않음)
         try:
-            # 네이버 포스트 작성자 페이지
+            if url:
+                resp = fetch_url(url, timeout=10)
+                text = (resp.text or "")[:4000]
+                if "종료" in text or "end_post" in text or "2025년 4월 30일" in text:
+                    self.logger.error(self.SERVICE_ENDED_MSG)
+                    raise Exception(self.SERVICE_ENDED_MSG)
+        except Exception as e:
+            if "네이버 포스트" in str(e) and "종료" in str(e):
+                raise
+            # 네트워크 오류여도 서비스 종료가 확정된 상태이므로 동일 메시지
+            self.logger.error(self.SERVICE_ENDED_MSG)
+            raise Exception(self.SERVICE_ENDED_MSG) from e
+
+        # 종료 문구가 없는 예외적 응답 — 레거시 파싱 최후 시도
+        articles = self._legacy_fetch(site_config)
+        if not articles:
+            raise Exception(self.SERVICE_ENDED_MSG)
+        return articles
+
+    def _legacy_fetch(self, site_config: dict) -> list:
+        """서비스 종료 전 마크업용 폴백 (정상 동작 기대 안 함)."""
+        url = (site_config.get("url") or "").strip()
+        limit = int(site_config.get("limit", 5) or 5)
+        articles: list[dict] = []
+        try:
             resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
-            resp.encoding = resp.apparent_encoding
+            resp.encoding = resp.apparent_encoding or resp.encoding
             soup = BeautifulSoup(resp.text, "html.parser")
 
-
-            # 글 링크 추출
             post_links = soup.select("a.spot_post_area, a.link_end, ul.lst_feed li a")
             if not post_links:
-                # 대체 셀렉터
                 post_links = soup.select("a[href*='viewer/postView']")
 
-            seen_urls = set()
+            seen_urls: set[str] = set()
             for link in post_links:
                 if len(articles) >= limit:
                     break
@@ -58,20 +91,16 @@ class NaverPostScraper(BaseScraper):
                     articles.append({"title": title, "content": content, "url": href})
                 else:
                     self.last_fetch_stats["skipped"] = self.last_fetch_stats.get("skipped", 0) + 1
-
         except Exception as e:
-            self.logger.error(f"네이버 포스트 글 목록 수집 실패: {e}")
-
+            self.logger.warning(f"네이버 포스트 레거시 파싱 실패: {e}")
         return articles
 
     def _fetch_post_content(self, post_url: str, site_config: dict) -> str | None:
-        """개별 포스트 본문 수집"""
         try:
             resp = fetch_url(post_url, timeout=15)
             resp.raise_for_status()
-            resp.encoding = resp.apparent_encoding
+            resp.encoding = resp.apparent_encoding or resp.encoding
             soup = BeautifulSoup(resp.text, "html.parser")
-
 
             container = (
                 soup.select_one("div.__viewer_container")
@@ -81,13 +110,11 @@ class NaverPostScraper(BaseScraper):
                 or soup.select_one("article")
             )
             if not container:
-                self.logger.warning(f"포스트 본문 컨테이너 미발견: {post_url}")
                 return None
 
             maybe_strip_images(container, site_config)
             clean_naver_content(container)
             return str(container)
-
         except Exception as e:
             self.logger.warning(f"포스트 본문 수집 실패 ({post_url}): {e}")
             return None

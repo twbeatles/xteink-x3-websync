@@ -11,15 +11,20 @@ from websync.scrapers.naver_cafe import NaverCafeScraper
 from websync.scrapers.naver_post import NaverPostScraper
 from websync.scrapers.soonsal import SoonsalScraper
 from websync.scrapers.moneyletter import MoneyLetterScraper
+from websync.scrapers.velog import VelogScraper
+from websync.scrapers.newneek import NewneekScraper
+from websync.scrapers.types import SCRAPER_TYPES
 
 
 class ScraperFactory:
     _scrapers = {
         "css": CssSelectorScraper(),
         "rss": RssScraper(),
+        "velog": VelogScraper(),
         "naver": NaverBlogScraper(),
         "tistory": TistoryScraper(),
         "brunch": BrunchScraper(),
+        "newneek": NewneekScraper(),
         "youtube": YoutubeScraper(),
         "substack": SubstackScraper(),
         "naver_cafe": NaverCafeScraper(),
@@ -28,6 +33,7 @@ class ScraperFactory:
         "moneyletter": MoneyLetterScraper(),
     }
 
+    SUPPORTED_TYPES = SCRAPER_TYPES
 
     @classmethod
     def get_scraper(cls, scraper_type: str) -> BaseScraper:
@@ -39,3 +45,7 @@ class ScraperFactory:
     @classmethod
     def register_scraper(cls, scraper_type: str, scraper: BaseScraper):
         cls._scrapers[scraper_type.lower()] = scraper
+
+    @classmethod
+    def list_types(cls) -> list[str]:
+        return list(SCRAPER_TYPES)

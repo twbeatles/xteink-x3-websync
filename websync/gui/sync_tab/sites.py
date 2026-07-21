@@ -13,6 +13,8 @@ from websync.gui.widgets import (
 )
 from websync.upload.uploader import X3Uploader, normalize_device_host
 from websync.config.exceptions import ConfigSaveError, ConfigLoadError
+from websync.scrapers.types import SCRAPER_TYPES, SPECIALIZED_TYPES
+from websync.scrapers.presets import preset_labels, get_preset_by_label
 
 
 class SyncSitesMixin:
@@ -68,7 +70,7 @@ class SyncSitesMixin:
         dialog = tk.Toplevel(self.app.root)
         dialog.title(title)
         dialog.configure(bg=BG_COLOR)
-        setup_dialog(dialog, self.app.root, 560, 540)
+        setup_dialog(dialog, self.app.root, 580, 600)
 
         content = ttk.Frame(dialog)
         content.pack(fill="both", expand=True)
@@ -77,27 +79,43 @@ class SyncSitesMixin:
         form = ttk.Frame(frame)
         form.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ttk.Label(form, text="사이트 이름:").grid(row=0, column=0, sticky="w", pady=8)
-        name_entry = ttk.Entry(form, width=40)
-        name_entry.grid(row=0, column=1, sticky="w", pady=8)
+        # 한국 추천 프리셋
+        ttk.Label(form, text="추천 프리셋:").grid(row=0, column=0, sticky="w", pady=8)
+        preset_cb = ttk.Combobox(
+            form,
+            values=preset_labels(),
+            state="readonly",
+            width=38,
+        )
+        preset_cb.grid(row=0, column=1, sticky="w", pady=8)
+        preset_cb.set("(직접 입력)")
+        ttk.Label(
+            form,
+            text="선택 시 이름·유형·URL이 채워집니다 (수정 가능)",
+            font=("Malgun Gothic", 8),
+            foreground=HINT_COLOR,
+        ).grid(row=1, column=1, sticky="w")
 
-        ttk.Label(form, text="타입 (유형):").grid(row=1, column=0, sticky="w", pady=8)
-        # M6: naver_cafe, naver_post 추가
+        ttk.Label(form, text="사이트 이름:").grid(row=2, column=0, sticky="w", pady=8)
+        name_entry = ttk.Entry(form, width=40)
+        name_entry.grid(row=2, column=1, sticky="w", pady=8)
+
+        ttk.Label(form, text="타입 (유형):").grid(row=3, column=0, sticky="w", pady=8)
         type_cb = ttk.Combobox(
             form,
-            values=["css", "rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "soonsal", "moneyletter"],
+            values=list(SCRAPER_TYPES),
             state="readonly",
             width=15
         )
-        type_cb.grid(row=1, column=1, sticky="w", pady=8)
+        type_cb.grid(row=3, column=1, sticky="w", pady=8)
         type_cb.set("css")
 
-        ttk.Label(form, text="수집 주소(URL):").grid(row=2, column=0, sticky="w", pady=8)
+        ttk.Label(form, text="수집 주소(URL):").grid(row=4, column=0, sticky="w", pady=8)
         url_entry = ttk.Entry(form, width=40)
-        url_entry.grid(row=2, column=1, sticky="w", pady=8)
+        url_entry.grid(row=4, column=1, sticky="w", pady=8)
 
         css_frame = ttk.LabelFrame(form, text=" CSS 선택자 설정 (CSS 타입 전용) ")
-        css_frame.grid(row=3, column=0, columnspan=2, sticky="we", pady=10, ipady=5)
+        css_frame.grid(row=5, column=0, columnspan=2, sticky="we", pady=10, ipady=5)
 
         ttk.Label(css_frame, text="아이템 컨테이너:").grid(row=0, column=0, sticky="w", padx=10, pady=5)
         item_entry = ttk.Entry(css_frame, width=28)
@@ -114,18 +132,18 @@ class SyncSitesMixin:
         content_entry.grid(row=2, column=1, sticky="w", pady=5)
         content_entry.insert(0, ".post-content")
 
-        ttk.Label(form, text="불필요 요소 제거 CSS:").grid(row=4, column=0, sticky="w", pady=8)
+        ttk.Label(form, text="불필요 요소 제거 CSS:").grid(row=6, column=0, sticky="w", pady=8)
         remove_entry = ttk.Entry(form, width=40)
-        remove_entry.grid(row=4, column=1, sticky="w", pady=8)
+        remove_entry.grid(row=6, column=1, sticky="w", pady=8)
 
-        ttk.Label(form, text="최대 수집 개수:").grid(row=5, column=0, sticky="w", pady=8)
+        ttk.Label(form, text="최대 수집 개수:").grid(row=7, column=0, sticky="w", pady=8)
         limit_entry = ttk.Entry(form, width=10)
-        limit_entry.grid(row=5, column=1, sticky="w", pady=8)
+        limit_entry.grid(row=7, column=1, sticky="w", pady=8)
         limit_entry.insert(0, "5")
 
         # 이미지 포함 / 번역 / 상세 페이지 옵션
         opt_frame = ttk.Frame(form)
-        opt_frame.grid(row=6, column=0, columnspan=2, sticky="we", pady=5)
+        opt_frame.grid(row=8, column=0, columnspan=2, sticky="we", pady=5)
         include_img_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="이미지 포함", variable=include_img_var).pack(side="left", padx=5)
         fetch_detail_var = tk.BooleanVar(value=False)
@@ -142,14 +160,32 @@ class SyncSitesMixin:
 
         def on_type_change(event=None):
             t = type_cb.get()
-            state = "disabled" if t in ("rss", "naver", "tistory", "brunch", "youtube", "substack", "naver_cafe", "naver_post", "soonsal", "moneyletter") else "normal"
+            state = "disabled" if t in SPECIALIZED_TYPES else "normal"
             for w in (item_entry, title_entry, content_entry, remove_entry):
                 w.config(state=state)
             detail_cb.config(state="normal" if t == "css" else "disabled")
             if t != "css":
                 fetch_detail_var.set(False)
 
+        def on_preset_change(event=None):
+            preset = get_preset_by_label(preset_cb.get())
+            if not preset:
+                return
+            # 직접 입력은 폼 유지
+            if preset.get("label") == "(직접 입력)" or not preset.get("url"):
+                return
+            name_entry.delete(0, tk.END)
+            name_entry.insert(0, preset.get("name") or "")
+            type_cb.set(preset.get("type") or "rss")
+            url_entry.delete(0, tk.END)
+            url_entry.insert(0, preset.get("url") or "")
+            limit_entry.delete(0, tk.END)
+            limit_entry.insert(0, str(preset.get("limit", 5)))
+            include_img_var.set(bool(preset.get("include_images", False)))
+            on_type_change()
+
         type_cb.bind("<<ComboboxSelected>>", on_type_change)
+        preset_cb.bind("<<ComboboxSelected>>", on_preset_change)
 
         if site_data:
             name_entry.insert(0, site_data.get("name", ""))

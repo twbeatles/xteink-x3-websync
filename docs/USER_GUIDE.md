@@ -1,6 +1,12 @@
-# Xteink X3 WebSync Manager — 간단 사용설명서
+# Xteink X3 WebSync Manager — 사용 설명서
 
 뉴스·블로그·RSS 등을 모아 **e-ink 리더기(Xteink X3 / CrossPoint)** 에 최적화된 EPUB으로 만들고, Wi-Fi로 무선 전송하는 PC용 프로그램입니다.
+
+| 문서 | 대상 |
+|------|------|
+| [README](../README.md) | 빠른 시작 |
+| **이 문서** | 화면·설정·사이트 유형·문제 해결 |
+| [개발자 가이드](DEVELOPER.md) | 코드 구조·테스트·빌드 |
 
 ---
 
@@ -91,25 +97,41 @@ GUI 없이 설정된 사이트만 수집·전송합니다.
 ### ③ 사이트 등록
 
 1. **사이트 추가** 클릭
-2. **이름**, **유형**, **URL** 입력 후 저장
-3. 목록에서 **활성 토글**로 on/off 가능 (비활성 사이트는 동기화에서 제외)
+2. 가능하면 **추천 프리셋**에서 골라 이름·유형·URL을 자동으로 채운 뒤 필요 시 수정  
+   (또는 이름·유형·URL을 직접 입력)
+3. 저장 후 목록에서 **활성 토글**로 on/off (비활성 사이트는 동기화에서 제외)
 
 #### 사이트 유형 선택 가이드
 
 | 유형 | 언제 쓰나요 | URL 예 |
 |------|-------------|--------|
 | `rss` | RSS/Atom 피드가 있을 때 (가장 안정적) | `https://example.com/feed` |
+| `velog` | Velog 작가 (내부적으로 RSS) | `https://velog.io/@아이디` |
 | `naver` | 네이버 블로그 | `https://blog.naver.com/아이디` |
-| `naver_post` | 네이버 포스트 | 포스트 채널 URL |
-| `naver_cafe` | 네이버 카페 | 카페 관련 URL |
-| `tistory` | 티스토리 블로그 | 블로그 주소 |
-| `brunch` | 브런치 | 작가/매거진 주소 |
+| `naver_post` | ~~네이버 포스트~~ (**2025-04-30 서비스 종료** — 수집 불가) | — |
+| `naver_cafe` | 네이버 **공개** 카페 (로그인·멤버 전용 글은 불가) | `https://cafe.naver.com/카페ID` |
+| `tistory` | 티스토리 블로그 | `https://example.tistory.com` |
+| `brunch` | 브런치 작가 프로필 | `https://brunch.co.kr/@작가ID` |
+| `newneek` | 뉴닉 아티클 | `https://newneek.co/@newneek` |
+| `soonsal` | 순살브리핑 뉴스레터 | `https://soonsal.com/newsletters/` |
+| `moneyletter` | 어피티 머니레터 | `https://uppity.co.kr/newsletter/money-letter/` |
 | `substack` | Substack 뉴스레터 | 서브스택 URL |
 | `youtube` | 유튜브 채널 자막 → 텍스트 | 채널/영상 URL |
 | `css` | 위 전용 유형이 없을 때 HTML 선택자로 수집 | 목록 페이지 URL |
 
-> **추천**: 가능하면 `rss` 또는 전용 유형(`naver`, `tistory` 등)을 쓰세요.  
+> **추천**: 사이트 추가 대화상자의 **추천 프리셋**에서 Velog·뉴닉·한겨레·기술 블로그 등을 고르면  
+> 이름·유형·URL이 자동으로 채워집니다.  
 > `css`는 목록·제목·본문 **CSS 선택자**를 직접 넣어야 합니다.
+
+#### 한국에서 쓰기 좋은 RSS 예시 (type=`rss` 또는 프리셋)
+
+| 소스 | URL 예 |
+|------|--------|
+| Velog 작가 | `https://velog.io/@아이디` (`type=velog`) 또는 `https://v2.velog.io/rss/@아이디` |
+| 한겨레 전체 | `https://www.hani.co.kr/rss/` (요약·이미지 위주일 수 있음) |
+| 토스 / 카카오 / 우아한형제들 / 라인 기술 블로그 | 프리셋 목록 참고 |
+
+언론·커뮤니티 **로그인 필수·페이월** 사이트는 지원하지 않습니다.
 
 사이트별 옵션 예:
 
@@ -309,7 +331,8 @@ pip install -r requirements-optional.txt
 
 ## 더 자세한 내용
 
-- 개발·모듈 구조: `README.md`, `CLAUDE.md`
-- 기능 제안·로드맵: `FEATURE_PROPOSALS.md`
+- 빠른 시작: [README](../README.md)
+- 개발·모듈 구조·테스트·빌드: [DEVELOPER.md](DEVELOPER.md), 루트 `CLAUDE.md`
+- 기능 제안·로드맵: [FEATURE_PROPOSALS.md](FEATURE_PROPOSALS.md)
 
 문의나 개선 아이디어가 있으면 저장소 이슈로 남겨 주세요.

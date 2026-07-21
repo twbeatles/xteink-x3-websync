@@ -1,0 +1,21 @@
+{
+  "desc": "OK",
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "no": 101,
+        "title": "픽스처 브런치 글 제목",
+        "status": "publish",
+        "contentSummary": "요약"
+      },
+      {
+        "no": 100,
+        "title": "두 번째 글",
+        "status": "publish"
+      }
+    ],
+    "totalCount": 2,
+    "moreList": false
+  }
+}

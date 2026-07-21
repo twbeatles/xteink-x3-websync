@@ -14,7 +14,8 @@
 
 ## 1. Executive Summary
 
-**Xteink X3 WebSync Manager**는 9종 스크래퍼, EPUB 빌더, 다중 기기 무선 업로드, OPDS/웹 대시보드 서버, Calibre 연동, 스케줄러를 갖춘 다기능 데스크톱 애플리케이션입니다. 이전 감사(2026-07-13)에서 지적된 Calibre Watch 락 우회, 네이버 카페/포스트 인코딩, 커스텀 CSS 로깅 문제는 **모두 해결**된 상태입니다.
+**Xteink X3 WebSync Manager**는 (당시 기준) 다수 스크래퍼, EPUB 빌더, 다중 기기 무선 업로드, OPDS/웹 대시보드 서버, Calibre 연동, 스케줄러를 갖춘 다기능 데스크톱 애플리케이션입니다. 이전 감사(2026-07-13)에서 지적된 Calibre Watch 락 우회, 네이버 카페/포스트 인코딩, 커스텀 CSS 로깅 문제는 **모두 해결**된 상태입니다.  
+> **2026-07-21 참고**: 현재 factory 스크래퍼는 **13종**이며, 최신 구현·문서 상태는 루트 [`PROJECT_AUDIT.md`](../PROJECT_AUDIT.md) 및 [`DEVELOPER.md`](DEVELOPER.md)를 보세요.
 
 - **전체 위험도**: **Medium**
 - **핵심 요약**:

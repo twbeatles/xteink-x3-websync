@@ -4,7 +4,8 @@
 > **감사 관점**: 기능 구현 — 동시성, 예외 처리, 데이터 흐름, 보안, 경로/인코딩, 설정·DB, 테스트, 문서 정합  
 > **방법**: `README.md` / `CLAUDE.md` 숙지 → **CodeGraph MCP**로 진입점·호출 관계·영향 범위 분석 → 필요 시 소스·테스트 보조 확인  
 > **참고**: 기존 `docs/PROJECT_AUDIT.md`(2026-07-14)는 구버전 이슈 기록. 본 문서는 **2026-07-20 전면 재감사**입니다.  
-> **수정 반영 (2026-07-20)**: 아래 High/Medium 다수 항목을 코드에 반영했습니다. 회귀 테스트 **121 passed**.
+> **수정 반영 (2026-07-20)**: 아래 High/Medium 다수 항목을 코드에 반영했습니다.  
+> **문서·스크래퍼 정합 (2026-07-21)**: 스크래퍼 **13종** (`velog`, `newneek` 포함), 한국 프리셋 GUI, `docs/DEVELOPER.md`, README 사용 중심 개편, 실사이트 검증 스크립트·픽스처 테스트. 회귀 `pytest` **138+ passed**.
 
 ---
 
@@ -44,7 +45,7 @@ websync/
   core/                       # paths, process_lock, logger, article
   config/                     # manager, validator, exceptions
   db/                         # SyncHistoryDb
-  scrapers/                   # 11종 + factory (css/rss/naver/…/soonsal/moneyletter)
+  scrapers/                   # 13종 + factory/types/presets (…/velog/newneek/soonsal/moneyletter)
   epub/                       # builder, css, cover, sanitize, themes
   upload/                     # uploader, device_client, host, remote_path
   pipeline/                   # SyncService 파사드 + sync/preview/selected
@@ -291,8 +292,8 @@ main()
 | Calibre CLI 파싱/경로 | 테스트 거의 없음 — 버전별 깨짐 가능 | **추정** |
 | `summary_html` in `build()` | AI 요약은 escape됨. 다른 경로 주입 시 XSS성 이슈 가능 | **추정** |
 | 웹 대시보드 CSRF | SameSite=Strict로 완화. 커스텀 클라이언트는 토큰 필요 | Low |
-| README “9종 스크래퍼” | 실제 factory **11종** (+ soonsal, moneyletter) | 문서 불일치 |
-| CLAUDE.md 트리에 `backup/` 없음 | 구현·README 3b와 불일치 | 문서 불일치 |
+| ~~README “9종 스크래퍼”~~ | **2026-07-21**: README 사용 중심 개편, factory **13종** 반영 | 해소 |
+| ~~CLAUDE.md 트리에 `backup/` 없음~~ | 구현과 맞춤 갱신 중 | 해소 진행 |
 | CLAUDE `config_version: 2` 스키마에 `backup_sync` 없음 | 코드 DEFAULT에는 존재, 버전 번호 없이 키 머지 | 문서 갭 |
 | `docs/PROJECT_AUDIT.md` vs 루트 | 구감사와 병존 시 혼동 | 문서 운영 |
 
@@ -361,12 +362,11 @@ main()
 
 | 문서 | 구현 | 비고 |
 |------|------|------|
-| README “스크래퍼 9종” / 모듈 “9종” | factory 11 키 | soonsal, moneyletter 추가됨 |
-| CLAUDE 트리 `settings_tab`: epub/servers/watch/ai | + `backup_sync.py` | 누락 |
-| CLAUDE에 `websync/backup` 없음 | 패키지 존재 | 누락 |
-| CLAUDE config 예시 `backup_sync` 없음 | DEFAULT_CONFIG에 존재 | 누락 |
-| CLAUDE “docs/PROJECT_AUDIT.md” | 본 파일은 루트 `PROJECT_AUDIT.md` | 이중 문서 |
-| USER_GUIDE 클라우드 백업 | 구현과 대체로 일치 | 양호 |
+| ~~README 스크래퍼 종수~~ | factory **13종** (`SCRAPER_TYPES`) | 2026-07-21 동기화 |
+| README | 사용 중심; 상세는 `docs/USER_GUIDE` · `docs/DEVELOPER` | 의도적 분리 |
+| CLAUDE 스크래퍼 트리 | velog/newneek/types/presets 반영 | 2026-07-21 |
+| CLAUDE “docs/PROJECT_AUDIT.md” | 본 파일은 루트 `PROJECT_AUDIT.md` | 이중 문서(아카이브 유지) |
+| USER_GUIDE | 유형 표·프리셋·newneek/velog | 양호 |
 | 이전 docs 감사: Watch 무한 blocking | timeout 30s + 큐 | 구식 |
 
 ---

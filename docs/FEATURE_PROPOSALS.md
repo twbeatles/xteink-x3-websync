@@ -54,9 +54,14 @@
 | C. 진행률 표시바 | ✅ | `gui/app.py` |
 | D. 동기화 이력 탭 | ✅ | `gui/app.py` + `db/history.py` |
 | E. 티스토리 스크래퍼 | ✅ | `scrapers/tistory.py` |
-| F. 브런치 스크래퍼 | ✅ | `scrapers/brunch.py` |
+| F. 브런치 스크래퍼 | ✅ | `scrapers/brunch.py` (API 목록 + 본문 현행화 2026-07-21) |
 | G. YouTube 자막 수집 | ✅ | `scrapers/youtube.py` |
 | H. Substack 스크래퍼 | ✅ | `scrapers/substack.py` |
+| (추가) Velog | ✅ | `scrapers/velog.py` — RSS 래퍼 |
+| (추가) 뉴닉 | ✅ | `scrapers/newneek.py` — 사이트맵 + NEXT_DATA |
+| (추가) 순살/머니레터 | ✅ | `soonsal.py` / `moneyletter.py` |
+| (추가) 한국 추천 프리셋 GUI | ✅ | `scrapers/presets.py` + `gui/sync_tab/sites.py` |
+| M6. 네이버 카페/포스트 | ✅ / 종료 | cafe 구현; post는 2025-04 서비스 종료 안내 |
 | I. 이미지 선택 포함 | ✅ | `scrapers/base.py` |
 | J. AI 요약 삽입 | ✅ | `pipeline/summarizer.py` |
 | K. 전자책 표지 생성 | ✅ | `epub/builder.py` |
