@@ -37,7 +37,7 @@ a = Analysis(
         ('websync/epub/themes/*.css', 'websync/epub/themes'),
     ],
     hiddenimports=[
-        'lxml', 'lxml.etree', 'lxml_html_clean', 'ebooklib', 'bs4', 'requests',
+        'lxml', 'lxml.etree', 'ebooklib', 'bs4', 'requests',
         'websync', 'websync.core', 'websync.core.paths', 'websync.core.logger',
         'websync.core.process_lock', 'websync.core.article', 'websync.core.types',
         'websync.config', 'websync.config.exceptions', 'websync.config.validator',
