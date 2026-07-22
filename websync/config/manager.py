@@ -374,7 +374,11 @@ class ConfigManager:
             raise ConfigSaveError(f"사이트 설정 내보내기 실패: {e}") from e
 
     def import_sites(self, file_path: str) -> list[dict]:
-        """JSON 파일에서 사이트 설정을 읽어와 기존 설정에 중복 없이 임포트한 뒤 추가된 목록을 반환합니다."""
+        """JSON 파일에서 사이트 설정을 읽어와 기존 설정에 중복 없이 임포트한 뒤 추가된 목록을 반환합니다.
+
+        디스크 최신본에 대해 RMW(`update_config`)로 병합하여 동시 저장과 경합해도
+        다른 필드를 덮어쓰지 않습니다.
+        """
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 import_data = json.load(f)
@@ -388,25 +392,40 @@ class ConfigManager:
         if not isinstance(imported_sites, list):
             raise ConfigLoadError("올바른 사이트 설정 내보내기 파일 포맷이 아닙니다.")
 
-        config = self.load_config()
-        current_sites = config.setdefault("sites", [])
-        current_urls = {s.get("url", "").strip().lower() for s in current_sites if s.get("url")}
-
-        added_sites = []
+        # 임포트 후보를 미리 정규화 (mutator 밖)
+        prepared: list[dict] = []
         for site in imported_sites:
             if not isinstance(site, dict):
                 continue
             url = site.get("url", "").strip().lower()
-            if not url or url in current_urls:
-                continue  # URL 중복 및 빈 URL 제외
-            
-            # DEFAULT_SITE와 머지하여 결손 키 보강
+            if not url:
+                continue
             merged_site, _ = self._deep_merge(self.DEFAULT_SITE, site)
-            current_sites.append(merged_site)
-            added_sites.append(merged_site)
+            prepared.append(merged_site)
 
-        if added_sites:
-            self.save_config(config)
+        if not prepared:
+            return []
 
-        return added_sites
+        added_holder: list[dict] = []
+
+        def _mutator(config: dict) -> None:
+            current_sites = config.setdefault("sites", [])
+            if not isinstance(current_sites, list):
+                current_sites = []
+                config["sites"] = current_sites
+            current_urls = {
+                (s.get("url") or "").strip().lower()
+                for s in current_sites
+                if isinstance(s, dict) and s.get("url")
+            }
+            for site in prepared:
+                url = (site.get("url") or "").strip().lower()
+                if not url or url in current_urls:
+                    continue
+                current_sites.append(site)
+                current_urls.add(url)
+                added_holder.append(site)
+
+        self.update_config(_mutator)
+        return added_holder
 

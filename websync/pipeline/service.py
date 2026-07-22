@@ -161,16 +161,11 @@ class SyncService:
     def _article_sync_key(article: dict, site_name: str, base_url: str) -> str:
         return article_sync_key(article, site_name, base_url)
 
-    def run_sync_pipeline(
+    def _try_acquire_pipeline_locks(
         self,
         log_callback: Optional[Callable[[str], None]] = None,
-        progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> bool:
-        """
-        동기화 파이프라인 실행.
-        Returns:
-            bool: True이면 성공 또는 신규 기사 없음 / False이면 오류 또는 이미 실행 중
-        """
+        """파이프라인 스레드·프로세스 락을 비차단 획득. 실패 시 False."""
         if not self._pipeline_lock.acquire(blocking=False):
             msg = "⚠️ 동기화가 이미 실행 중입니다. 완료 후 다시 시도해 주세요."
             self.logger.warning(msg)
@@ -189,16 +184,71 @@ class SyncService:
             else:
                 print(msg)
             return False
+        return True
+
+    def _release_pipeline_locks(self) -> None:
+        try:
+            self._process_lock.release()
+        finally:
+            self._pipeline_lock.release()
+
+    def _run_pipeline_body(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> bool:
+        """락 보유 전제 하에 pull → 동기화 → push 실행."""
+        self.maybe_backup_pull(log_callback=log_callback)
+        ok = self._run_sync_pipeline_locked(log_callback, progress_callback)
+        self.maybe_backup_push(log_callback=log_callback)
+        return ok
+
+    def begin_sync_pipeline_async(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> bool:
+        """락을 선점한 뒤 백그라운드에서 파이프라인을 시작한다.
+
+        Returns:
+            True: 백그라운드 기동 수락 / False: 이미 실행 중 등으로 거부
+        """
+        if not self._try_acquire_pipeline_locks(log_callback):
+            return False
+
+        def _run():
+            try:
+                self._run_pipeline_body(log_callback, progress_callback)
+            except Exception as e:
+                self.logger.exception(f"백그라운드 동기화 실패: {e}")
+                if log_callback:
+                    try:
+                        log_callback(f"❌ 백그라운드 동기화 실패: {e}")
+                    except Exception:
+                        pass
+            finally:
+                self._release_pipeline_locks()
+
+        threading.Thread(target=_run, daemon=True).start()
+        return True
+
+    def run_sync_pipeline(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> bool:
+        """
+        동기화 파이프라인 실행 (호출 스레드에서 동기 실행).
+        Returns:
+            bool: True이면 성공 또는 신규 기사 없음 / False이면 오류 또는 이미 실행 중
+        """
+        if not self._try_acquire_pipeline_locks(log_callback):
+            return False
 
         try:
-            # 클라우드 폴더에서 사이트/이력을 먼저 합집합 반영 후 수집
-            self.maybe_backup_pull(log_callback=log_callback)
-            ok = self._run_sync_pipeline_locked(log_callback, progress_callback)
-            self.maybe_backup_push(log_callback=log_callback)
-            return ok
+            return self._run_pipeline_body(log_callback, progress_callback)
         finally:
-            self._process_lock.release()
-            self._pipeline_lock.release()
+            self._release_pipeline_locks()
 
     def _run_sync_pipeline_locked(
         self,

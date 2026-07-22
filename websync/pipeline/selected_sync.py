@@ -6,6 +6,13 @@ from typing import Callable, Optional
 
 from websync.pipeline.summarizer import Summarizer
 from websync.pipeline.translator import Translator
+from websync.pipeline.upload_results import (
+    collect_mark_entries,
+    collect_mark_entries_from_triples,
+    upload_all_ok,
+    upload_any_ok,
+)
+
 
 def sync_selected_articles(
     service,
@@ -46,6 +53,11 @@ def sync_selected_articles(
         target_ips = [d["ip"] for d in upload_targets]
         ip_to_name = {d["ip"]: d["name"] for d in upload_targets}
         epub_merge_mode = service.config.get("epub_merge_mode", "per_site")
+
+        if not target_ips:
+            log("⚠️ 등록된 전송 기기가 없습니다. X3 주소 또는 추가 기기를 설정해 주세요.")
+            service._last_pipeline_result = {"status": "no_targets", "success": False}
+            return False
 
         summarizer = Summarizer(service.config)
         translator = Translator(service.config)
@@ -90,7 +102,6 @@ def sync_selected_articles(
                 for art in arts:
                     all_urls.append((art["url"], site_name, art.get("title", "")))
 
-            # pending_set 패턴으로 중복 방지 (run_sync_pipeline과 일관성)
             pending_ips = []
             pending_set: set[str] = set()
             for ip in target_ips:
@@ -104,21 +115,15 @@ def sync_selected_articles(
                 log(f"   => 파일 생성: {os.path.basename(epub_path)}")
 
                 upload_results = service.uploader.upload_to_targets(epub_path, only_ips=pending_ips)
-                any_ok = bool(upload_results) and any(upload_results.values())
-                all_ok = bool(upload_results) and all(upload_results.values())
+                any_ok = upload_any_ok(upload_results)
+                all_ok = upload_all_ok(upload_results, pending_ips)
 
                 if any_ok:
-                    batch = []
-                    for ip, ok in upload_results.items():
-                        if not ok:
-                            continue
-                        for url, site_name, title in all_urls:
-                            batch.append({
-                                "url": url,
-                                "site_name": site_name,
-                                "title": title,
-                                "device_ip": ip,
-                            })
+                    batch = collect_mark_entries_from_triples(
+                        upload_results,
+                        all_urls,
+                        is_synced_for_device=service.db.is_synced_for_device,
+                    )
                     if batch:
                         service.db.mark_synced_many(batch)
                     if all_ok:
@@ -138,11 +143,14 @@ def sync_selected_articles(
             for idx, (site_name, arts) in enumerate(articles_by_site.items()):
                 if progress_callback:
                     progress_callback(idx, actual_work)
-                
+
                 pending_ips = []
+                pending_set: set[str] = set()
                 for ip in target_ips:
                     if any(not service.db.is_synced_for_device(art["url"], ip) for art in arts):
-                        pending_ips.append(ip)
+                        if ip not in pending_set:
+                            pending_set.add(ip)
+                            pending_ips.append(ip)
 
                 if not pending_ips:
                     log(f"💡 [{site_name}] 이미 전송 완료되어 건너뜁니다.")
@@ -153,21 +161,16 @@ def sync_selected_articles(
                 epub_path = service.epub_builder.build(site_name, arts, generate_cover=generate_cover)
                 upload_results = service.uploader.upload_to_targets(epub_path, only_ips=pending_ips)
 
-                any_ok = bool(upload_results) and any(upload_results.values())
-                all_ok = bool(upload_results) and all(upload_results.values())
+                any_ok = upload_any_ok(upload_results)
+                all_ok = upload_all_ok(upload_results, pending_ips)
 
                 if any_ok:
-                    batch = []
-                    for ip, ok in upload_results.items():
-                        if not ok:
-                            continue
-                        for art in arts:
-                            batch.append({
-                                "url": art["url"],
-                                "site_name": site_name,
-                                "title": art.get("title", ""),
-                                "device_ip": ip,
-                            })
+                    batch = collect_mark_entries(
+                        upload_results,
+                        arts,
+                        site_name=site_name,
+                        is_synced_for_device=service.db.is_synced_for_device,
+                    )
                     if batch:
                         service.db.mark_synced_many(batch)
                     if all_ok:
@@ -183,7 +186,7 @@ def sync_selected_articles(
         if progress_callback:
             progress_callback(actual_work, actual_work)
 
-        overall_ok = success_count == actual_work
+        overall_ok = success_count == actual_work and partial_count == 0
         service._last_pipeline_result = {
             "status": "completed",
             "success": overall_ok,

@@ -65,3 +65,44 @@ def test_macos_unloads_before_load():
     calls = [c.args[0] for c in mock_run.call_args_list if c.args]
     assert ["launchctl", "unload"] in [c[:2] for c in calls]
     assert ["launchctl", "load"] in [c[:2] for c in calls]
+
+
+def test_xml_escape_for_macos_plist():
+    assert SchedulerManager._xml_escape('a&b<c>"d"') == "a&amp;b&lt;c&gt;&quot;d&quot;"
+
+
+def test_macos_plist_escapes_special_chars_in_path():
+    """경로에 & 등이 있어도 plist XML이 깨지지 않도록 이스케이프한다."""
+    script = "/tmp/my & project/x3_websync.py"
+    mgr = SchedulerManager(script_path=script)
+    written = {}
+
+    def fake_open(path, mode="r", *a, **k):
+        from io import StringIO
+        if "w" in mode:
+            buf = StringIO()
+            written["path"] = path
+            written["buf"] = buf
+            # close 시 내용 보존
+            orig_close = buf.close
+
+            def close():
+                written["content"] = buf.getvalue()
+                orig_close()
+
+            buf.close = close  # type: ignore[method-assign]
+            return buf
+        raise FileNotFoundError(path)
+
+    with patch("sys.platform", "darwin"):
+        with patch("os.path.expanduser", return_value="/tmp/LaunchAgents"):
+            with patch("os.makedirs"):
+                with patch("os.path.exists", return_value=False):
+                    with patch("subprocess.run") as mock_run:
+                        mock_run.return_value = MagicMock(returncode=0)
+                        with patch("builtins.open", side_effect=fake_open):
+                            mgr.register_daily_task("08", "00")
+
+    content = written.get("content", "")
+    assert "my &amp; project" in content
+    assert "my & project" not in content

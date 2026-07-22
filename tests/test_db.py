@@ -82,6 +82,18 @@ def test_legacy_migration():
             pass
 
 
+def test_pending_device_ips_empty_targets():
+    db, path = _make_db()
+    try:
+        url = "https://example.com/pending"
+        assert db.pending_device_ips(url, []) == []
+        db.mark_synced(url, "s", "t", device_ip="10.0.0.1")
+        assert db.pending_device_ips(url, ["10.0.0.1", "10.0.0.2"]) == ["10.0.0.2"]
+        assert db.pending_device_ips(url, ["10.0.0.1"]) == []
+    finally:
+        _cleanup_db(db, path)
+
+
 def test_delete_entry_raises_on_error():
     db, path = _make_db()
     try:

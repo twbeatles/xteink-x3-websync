@@ -41,7 +41,8 @@ a = Analysis(
         'websync', 'websync.core', 'websync.core.paths', 'websync.core.logger',
         'websync.core.process_lock', 'websync.core.article', 'websync.core.types',
         'websync.config', 'websync.config.exceptions', 'websync.config.validator',
-        'websync.config.manager', 'websync.db', 'websync.db.history',
+        'websync.config.manager', 'websync.config.secrets',
+        'websync.db', 'websync.db.history',
         'websync.backup', 'websync.backup.service', 'websync.backup.atomic_io', 'websync.backup.format',
         # scrapers (13 types + factory/presets)
         'websync.scrapers', 'websync.scrapers.base', 'websync.scrapers.factory',
@@ -60,6 +61,7 @@ a = Analysis(
         'websync.pipeline', 'websync.pipeline.service',
         'websync.pipeline.sync_pipeline', 'websync.pipeline.preview',
         'websync.pipeline.selected_sync', 'websync.pipeline.article_keys',
+        'websync.pipeline.upload_results',
         'websync.pipeline.log_util', 'websync.pipeline.summarizer',
         'websync.pipeline.translator',
         'websync.integrations', 'websync.integrations.calibre', 'websync.integrations.notifier',

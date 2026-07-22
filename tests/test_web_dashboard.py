@@ -85,6 +85,48 @@ def test_api_sync_busy_response():
         srv.stop()
 
 
+def test_api_sync_callback_false_returns_409():
+    """sync_callback 이 False(락 거부 등)를 반환하면 202 성공이 아니라 409."""
+    srv = _start_dashboard(
+        api_token="tok123",
+        pipeline_busy_callback=lambda: False,
+        sync_callback=lambda: False,
+    )
+    try:
+        url = f"http://127.0.0.1:{srv.port}/api/sync"
+        req = urllib.request.Request(
+            url, method="POST", headers={"Authorization": "Bearer tok123"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=3)
+        assert exc.value.code == 409
+        body = json.loads(exc.value.read().decode())
+        assert body.get("ok") is False
+        assert body.get("started") is False
+    finally:
+        srv.stop()
+
+
+def test_api_sync_accepted_includes_started_flag():
+    srv = _start_dashboard(
+        api_token="tok123",
+        pipeline_busy_callback=lambda: False,
+        sync_callback=lambda: True,
+    )
+    try:
+        url = f"http://127.0.0.1:{srv.port}/api/sync"
+        req = urllib.request.Request(
+            url, method="POST", headers={"Authorization": "Bearer tok123"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            assert resp.status == 202
+            data = json.loads(resp.read())
+        assert data.get("ok") is True
+        assert data.get("started") is True
+    finally:
+        srv.stop()
+
+
 def test_api_status_returns_last_result():
     srv = _start_dashboard(
         api_token="tok123",

@@ -2,7 +2,8 @@
 
 > **주의**: 이 문서는 **2026-07-14** 기준 감사 기록입니다.  
 > **최신 감사 및 수정 반영 현황**은 저장소 루트의 [`PROJECT_AUDIT.md`](../PROJECT_AUDIT.md) 를 참고하세요.  
-> 2026-07-20 이후 감사 제안 사항의 상당수가 코드에 반영되었습니다 (config revision CAS, 스케줄 경로 인용, 레거시 `*`, preview 락, backup `auto_export`, mark_synced_many 등).
+> 2026-07-20 이후 감사 제안 사항의 상당수가 코드에 반영되었습니다.  
+> **2026-07-22**: 웹 `/api/sync` 409 계약, daily_digest/기기 0대 판정, `import_sites` RMW, config 충돌 재시도, upload 헬퍼 공통화, 레거시 `*` 자동 이관 등 추가 반영 (`pytest` 151+).
 
 ---
 

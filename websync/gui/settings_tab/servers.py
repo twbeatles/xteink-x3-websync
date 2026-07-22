@@ -71,7 +71,10 @@ class SettingsServersMixin:
             bind_host = "0.0.0.0" if self.web_allow_lan_var.get() else "127.0.0.1"
 
             def sync_cb():
-                self.service.run_sync_pipeline(log_callback=self.app._make_log_callback())
+                # 락을 선점한 뒤 백그라운드 기동 — False 면 이미 실행 중(핸들러가 409)
+                return self.service.begin_sync_pipeline_async(
+                    log_callback=self.app._make_log_callback()
+                )
 
             self.app._web_dashboard = WebDashboard(
                 port=port,

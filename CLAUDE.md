@@ -321,7 +321,8 @@ run_sync_pipeline()
 | 역할 | 기기별(`device_ip`) 전송 완료 포스트 URL 이력 관리 |
 | 동시성 | `threading.Lock()` + `sqlite3.connect(timeout=10.0)` |
 | 테이블 | `synced_posts(url, device_ip PK, site_name, title, synced_at)` — 레거시 DB는 `device_ip='*'`로 자동 마이그레이션 |
-| API | `needs_sync(url, target_ips)`, `mark_synced(..., device_ip)`, `is_synced_for_device()` |
+| API | `needs_sync(url, target_ips)`, `mark_synced(..., device_ip)`, `is_synced_for_device()`, `remap_legacy_star_to_device(ip)` (파이프라인 시작 시 기본 기기로 자동 이관) |
+| 레거시 `*` | 마이그레이션 시 `device_ip='*'` 부여. **전 기기 완료로 취급하지 않음**. 동기화 시작 시 첫 대상 IP로 이관 |
 
 ---
 

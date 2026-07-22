@@ -99,11 +99,14 @@ class SyncHistoryDb:
         return any(not self.is_synced_for_device(url, ip) for ip in target_ips)
 
     def pending_device_ips(self, url: str, target_ips: list[str]) -> list[str]:
-        """아직 전송되지 않은 기기 IP 목록."""
+        """아직 전송되지 않은 기기 IP 목록.
+
+        target_ips 가 비어 있으면 전송 대상이 없으므로 항상 빈 목록을 반환합니다.
+        """
         if not url:
             return []
         if not target_ips:
-            return [] if self.is_synced(url) else []
+            return []
         return [ip for ip in target_ips if not self.is_synced_for_device(url, ip)]
 
     def is_synced(self, url: str) -> bool:

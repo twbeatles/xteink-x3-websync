@@ -35,8 +35,8 @@ xteink-x3-websync/
 |--------|------|
 | `x3_websync.py` | 진입점 — GUI / `--sync` |
 | `websync.core` | 경로, 로깅, 프로세스 락, 기사 URL 유틸 |
-| `websync.config` | `config.json` CRUD, 검증 |
-| `websync.pipeline` | 동기화·프리뷰·선택 전송 오케스트레이션 |
+| `websync.config` | `config.json` CRUD, 검증, secrets 마스킹 유틸 |
+| `websync.pipeline` | 동기화·프리뷰·선택 전송 오케스트레이션 (`upload_results` 공통 헬퍼) |
 | `websync.scrapers` | 사이트별 수집기 + `ScraperFactory` + 프리셋 |
 | `websync.epub` | EPUB 빌드 (테마·표지·정제) |
 | `websync.upload` | 무선 업로드, 기기 파일 API |
@@ -101,12 +101,16 @@ python -m pytest tests/test_scraper_fixtures.py tests/test_brunch_scraper.py -q
 | 동기화 이력 | URL + `device_ip` 단위, 성공 기기만 기록 |
 | 부분 재시도 | 미수신 기기만 재업로드 |
 | GUI ↔ `--sync` | 프로세스 파일 락으로 직렬화 |
+| 웹 대시보드 동기화 | `begin_sync_pipeline_async` — 락 선점 후 수락/거부를 즉시 반환 (`POST /api/sync` → 202/409) |
+| 기기 0대 | 파이프라인 시작 시 `no_targets` 로 실패 (무의미한 스크래핑 방지) |
+| 레거시 이력 `*` | 동기화 시작 시 기본 기기로 `remap_legacy_star_to_device` |
+| config 충돌 | GUI `_safe_save_config` 는 revision CAS + 병합 재시도(최대 3회) |
 
 ### 보안·프라이버시
 
 - **OPDS**: 기본 localhost 무인증. LAN 공개 시 API 키 필수 (Bearer / `X-Api-Key`). 쿼리 `?api_key=` 는 기본 비활성 (`X3_OPDS_ALLOW_QUERY_API_KEY=1` 로만 허용).
-- **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만.
-- **AI 요약·번역**: 기사 본문이 외부 API로 전송될 수 있음. 키는 `config.json` 로컬 저장.
+- **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만. 동기화 트리거 API는 인증 필수.
+- **AI 요약·번역**: 기사 본문이 외부 API로 전송될 수 있음. 키는 `config.json` 로컬 저장(gitignore). 표시 마스킹: `websync.config.secrets`.
 
 ---
 
@@ -128,7 +132,8 @@ Python 3.10+ 권장.
 python -m pytest tests/ -q
 ```
 
-주요 영역: config, db, pipeline, scrapers(픽스처), epub, uploader, servers, process_lock 등.
+주요 영역: config, db, pipeline, scrapers(픽스처), epub, uploader, servers, process_lock, backup, scheduler 등.  
+대략 **150+** 케이스 (감사 수정·회귀 테스트 포함). 정확한 수는 `pytest --collect-only -q` 로 확인.
 
 ---
 

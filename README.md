@@ -92,7 +92,8 @@ python x3_websync.py --sync
 | [**사용자 가이드**](docs/USER_GUIDE.md) | 화면 설명, 사이트 유형, 탭별 사용법, 문제 해결 |
 | [**개발자 가이드**](docs/DEVELOPER.md) | 폴더 구조, 모듈 역할, 테스트, EXE 빌드 |
 | [기능 제안·로드맵](docs/FEATURE_PROPOSALS.md) | 향후 아이디어 |
-| [프로젝트 감사](docs/PROJECT_AUDIT.md) | 구현 상태 점검 (개발용) |
+| [프로젝트 감사](docs/PROJECT_AUDIT.md) | 구버전 감사 아카이브 |
+| [최신 프로젝트 감사](PROJECT_AUDIT.md) | 기능 구현 감사·수정 반영 현황 (루트) |
 
 내부 아키텍처·확장 방법은 저장소 루트의 `CLAUDE.md`에도 정리되어 있습니다.
 

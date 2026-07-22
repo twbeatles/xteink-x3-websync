@@ -106,3 +106,43 @@ def test_update_config_rmw():
         loaded = cm.load_config()
         assert loaded["x3_ip"] == "192.168.9.9"
         assert any(s.get("url") == "https://x.test/feed" for s in loaded["sites"])
+
+
+def test_import_sites_rmw_preserves_other_fields():
+    """import_sites 가 전체 config 덮어쓰기 없이 sites 만 합집합 추가."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        cm = ConfigManager(path)
+        cfg = cm.load_config()
+        cfg["x3_ip"] = "10.1.2.3"
+        cm.save_config(cfg)
+
+        export_path = os.path.join(tmp, "sites_export.json")
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "export_version": 1,
+                    "sites": [
+                        {
+                            "name": "Imported",
+                            "type": "rss",
+                            "url": "https://import.example/feed",
+                            "limit": 3,
+                        }
+                    ],
+                },
+                f,
+            )
+
+        # 다른 스레드/경로가 갱신한 것처럼 IP를 update_config 로 변경
+        cm.update_config(lambda c: c.__setitem__("x3_ip", "10.9.9.9"))
+
+        added = cm.import_sites(export_path)
+        assert len(added) == 1
+        loaded = cm.load_config()
+        assert loaded["x3_ip"] == "10.9.9.9"
+        assert any(s.get("url") == "https://import.example/feed" for s in loaded["sites"])
+
+        # 중복 임포트 시 추가 없음
+        added2 = cm.import_sites(export_path)
+        assert added2 == []

@@ -93,19 +93,34 @@ class SchedulerManager:
             print(f"스케줄 등록 오류: {e}")
             return False
 
+    @staticmethod
+    def _xml_escape(value: str) -> str:
+        """plist XML 텍스트 노드용 이스케이프."""
+        return (
+            (value or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+
     def _register_macos(self, h_val: int, m_val: int) -> bool:
         """macOS launchd plist 기반 등록"""
         plist_dir = os.path.expanduser("~/Library/LaunchAgents")
         os.makedirs(plist_dir, exist_ok=True)
         plist_path = os.path.join(plist_dir, f"com.x3websync.{self.TASK_NAME}.plist")
         python_exe = sys.executable
+        script_x = self._xml_escape(self.script_path)
+        proj_x = self._xml_escape(self.project_dir)
+        py_x = self._xml_escape(python_exe)
 
         if getattr(sys, 'frozen', False):
-            args_xml = f"""        <string>{self.script_path}</string>
+            args_xml = f"""        <string>{script_x}</string>
         <string>--sync</string>"""
         else:
-            args_xml = f"""        <string>{python_exe}</string>
-        <string>{self.script_path}</string>
+            args_xml = f"""        <string>{py_x}</string>
+        <string>{script_x}</string>
         <string>--sync</string>"""
 
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -126,11 +141,11 @@ class SchedulerManager:
         <integer>{m_val}</integer>
     </dict>
     <key>WorkingDirectory</key>
-    <string>{self.project_dir}</string>
+    <string>{proj_x}</string>
     <key>StandardOutPath</key>
-    <string>{self.project_dir}/logs/launchd_stdout.log</string>
+    <string>{proj_x}/logs/launchd_stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{self.project_dir}/logs/launchd_stderr.log</string>
+    <string>{proj_x}/logs/launchd_stderr.log</string>
 </dict>
 </plist>"""
         try:

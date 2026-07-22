@@ -99,7 +99,8 @@ class AppHelpersMixin:
         return all(results.values()), bool(ok_labels), " | ".join(parts)
 
     def _safe_save_config(self, config: dict, *, parent=None, reload: bool = False) -> bool:
-        """설정을 저장합니다. revision CAS로 동시 갱신(백업 pull 등)과 충돌을 감지합니다."""
+        """설정을 저장합니다. revision CAS로 동시 갱신(백업 pull 등)과 충돌을 감지·재시도합니다."""
+        max_conflict_retries = 3
         try:
             # 치명적 검증 오류 시 저장 거부
             errors = self.service.config_manager.get_validation_errors(config)
@@ -110,31 +111,43 @@ class AppHelpersMixin:
                 self._log_message(f"❌ 설정 검증 실패: {fatal[0]}")
                 return False
 
-            expected = config.get("_config_revision")
-            try:
-                expected_i = int(expected) if expected is not None else None
-            except (TypeError, ValueError):
-                expected_i = None
-
-            try:
-                self.service.config_manager.save_config(
-                    config, expected_revision=expected_i
-                )
-            except ConfigConflictError as e:
-                # 디스크 최신본 + 메모리 의도 병합 후 재시도
-                disk = e.disk_config or self.service.config_manager.load_config()
-                merged = self._merge_config_on_conflict(disk, config)
+            working = config
+            last_conflict: Exception | None = None
+            for attempt in range(max_conflict_retries + 1):
+                expected = working.get("_config_revision")
                 try:
-                    disk_rev = int(disk.get("_config_revision") or 0)
+                    expected_i = int(expected) if expected is not None else None
                 except (TypeError, ValueError):
-                    disk_rev = 0
-                merged["_config_revision"] = disk_rev
-                self.service.config_manager.save_config(
-                    merged, expected_revision=disk_rev
-                )
-                config.clear()
-                config.update(merged)
-                self._log_message("☁ 설정 충돌을 병합해 저장했습니다 (백업/다른 작업과 동기화).")
+                    expected_i = None
+
+                try:
+                    self.service.config_manager.save_config(
+                        working, expected_revision=expected_i
+                    )
+                    if working is not config:
+                        config.clear()
+                        config.update(working)
+                    if attempt > 0:
+                        self._log_message(
+                            "☁ 설정 충돌을 병합해 저장했습니다 (백업/다른 작업과 동기화)."
+                        )
+                    last_conflict = None
+                    break
+                except ConfigConflictError as e:
+                    last_conflict = e
+                    if attempt >= max_conflict_retries:
+                        break
+                    disk = e.disk_config or self.service.config_manager.load_config()
+                    merged = self._merge_config_on_conflict(disk, working)
+                    try:
+                        disk_rev = int(disk.get("_config_revision") or 0)
+                    except (TypeError, ValueError):
+                        disk_rev = 0
+                    merged["_config_revision"] = disk_rev
+                    working = merged
+
+            if last_conflict is not None:
+                raise last_conflict
 
             # 항상 service.config 를 디스크와 맞춤 (stale 참조 방지)
             self.service._reload_config()
@@ -144,6 +157,15 @@ class AppHelpersMixin:
         except ConfigSaveError as e:
             messagebox.showerror("설정 저장 실패", str(e), parent=parent)
             self._log_message(f"❌ 설정 저장 실패: {e}")
+            return False
+        except ConfigConflictError as e:
+            messagebox.showerror(
+                "설정 저장 실패",
+                "다른 작업과 설정 충돌이 반복되어 저장하지 못했습니다.\n"
+                "잠시 후 다시 시도해 주세요.",
+                parent=parent,
+            )
+            self._log_message(f"❌ 설정 충돌 재시도 한도 초과: {e}")
             return False
         except Exception as e:
             messagebox.showerror("설정 저장 실패", str(e), parent=parent)

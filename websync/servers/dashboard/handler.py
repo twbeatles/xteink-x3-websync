@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import http.cookies
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
@@ -155,26 +154,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"ok": False, "message": "동기화 콜백이 설정되지 않았습니다."})
                 return
 
-            # 기동 직전 재확인 (TOCTOU 완화) — 실제 락은 run_sync_pipeline 내부
+            # 기동 직전 재확인 (TOCTOU 완화)
             if busy_cb and busy_cb():
                 self._send_json(409, {"ok": False, "message": "⚠️ 동기화가 이미 실행 중입니다."})
                 return
 
-            started = {"ok": False}
+            # sync_callback 계약:
+            # - True / None: 기동 수락 (None 은 하위 호환 — 호출 자체가 수락으로 간주)
+            # - False: 락 실패 등으로 거부 → 409
+            # 콜백이 동기 블로킹 파이프라인이면 요청 스레드가 오래 점유될 수 있으므로
+            # begin_sync_pipeline_async 처럼 "수락 여부만 즉시 반환"하는 형태를 권장한다.
+            try:
+                result = sync_cb()
+            except Exception as e:
+                self._send_json(
+                    500,
+                    {"ok": False, "message": f"❌ 동기화 기동 실패: {e}"},
+                )
+                return
 
-            def _run():
-                try:
-                    # sync_cb 가 False 를 반환하면 락 실패/이미 실행 중
-                    result = sync_cb()
-                    started["ok"] = bool(result) if result is not None else True
-                except Exception:
-                    started["ok"] = False
+            if result is False:
+                self._send_json(
+                    409,
+                    {
+                        "ok": False,
+                        "started": False,
+                        "message": "⚠️ 동기화가 이미 실행 중이거나 기동할 수 없습니다.",
+                    },
+                )
+                return
 
-            threading.Thread(target=_run, daemon=True).start()
             self._send_json(
                 202,
                 {
                     "ok": True,
+                    "started": True,
                     "message": "✅ 동기화가 백그라운드에서 시작됩니다.",
                 },
             )

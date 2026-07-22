@@ -10,6 +10,12 @@ from websync.db.history import SyncHistoryDbError
 from websync.pipeline.summarizer import Summarizer
 from websync.pipeline.translator import Translator
 from websync.pipeline.article_keys import article_sync_key
+from websync.pipeline.upload_results import (
+    collect_mark_entries,
+    collect_mark_entries_from_triples,
+    upload_all_ok,
+    upload_any_ok,
+)
 
 def run_sync_pipeline_locked(
     service,
@@ -46,6 +52,24 @@ def run_sync_pipeline_locked(
     upload_targets = service.uploader._build_target_list()
     target_ips = [d["ip"] for d in upload_targets]
     ip_to_name = {d["ip"]: d["name"] for d in upload_targets}
+
+    if not target_ips:
+        log("⚠️ 등록된 전송 기기가 없습니다. X3 주소 또는 추가 기기를 설정해 주세요.")
+        ToastNotifier.show_toast(
+            "X3 WebSync 실패",
+            "전송 대상 기기가 없습니다. 기기 주소를 확인해 주세요.",
+            is_error=True,
+        )
+        service._last_pipeline_result = {"status": "no_targets", "success": False}
+        return False
+
+    # 레거시 device_ip='*' 이력을 기본 기기로 1회 이관
+    try:
+        remapped = service.db.remap_legacy_star_to_device(target_ips[0])
+        if remapped:
+            log(f"🔄 레거시 동기화 이력 {remapped}건을 [{ip_to_name.get(target_ips[0], target_ips[0])}]로 이관했습니다.")
+    except SyncHistoryDbError as e:
+        log(f"⚠️ 레거시 이력 이관 실패(계속 진행): {e}")
 
     epub_merge_mode = service.config.get("epub_merge_mode", "per_site")
     digest_articles = {}  # {site_name: [new_articles]}
@@ -143,22 +167,16 @@ def run_sync_pipeline_locked(
                             detail = f" — {err}"
                     log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송{detail}")
 
-                any_ok = bool(upload_results) and any(upload_results.values())
-                all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
+                any_ok = upload_any_ok(upload_results)
+                all_ok = upload_all_ok(upload_results, pending_ips)
 
                 if any_ok:
-                    batch = []
-                    for ip, ok in upload_results.items():
-                        if not ok:
-                            continue
-                        for art in new_articles:
-                            if not service.db.is_synced_for_device(art["url"], ip):
-                                batch.append({
-                                    "url": art["url"],
-                                    "site_name": name,
-                                    "title": art.get("title", ""),
-                                    "device_ip": ip,
-                                })
+                    batch = collect_mark_entries(
+                        upload_results,
+                        new_articles,
+                        site_name=name,
+                        is_synced_for_device=service.db.is_synced_for_device,
+                    )
                     if batch:
                         service.db.mark_synced_many(batch)
                     if all_ok:
@@ -219,22 +237,15 @@ def run_sync_pipeline_locked(
                             detail = f" — {err}"
                     log(f"   => {status} [{ip_to_name.get(ip, ip)}] ({ip}) 전송{detail}")
 
-                any_ok = bool(upload_results) and any(upload_results.values())
-                all_ok = bool(upload_results) and all(upload_results.values()) and set(upload_results) == set(pending_ips)
+                any_ok = upload_any_ok(upload_results)
+                all_ok = upload_all_ok(upload_results, pending_ips)
 
                 if any_ok:
-                    batch = []
-                    for ip, ok in upload_results.items():
-                        if not ok:
-                            continue
-                        for url, site_name, title in all_new_urls:
-                            if not service.db.is_synced_for_device(url, ip):
-                                batch.append({
-                                    "url": url,
-                                    "site_name": site_name,
-                                    "title": title,
-                                    "device_ip": ip,
-                                })
+                    batch = collect_mark_entries_from_triples(
+                        upload_results,
+                        all_new_urls,
+                        is_synced_for_device=service.db.is_synced_for_device,
+                    )
                     if batch:
                         service.db.mark_synced_many(batch)
                     if all_ok:
@@ -247,7 +258,8 @@ def run_sync_pipeline_locked(
                 else:
                     log("❌ 일간 합본 전송 실패! 기기 상태를 확인하세요.")
             else:
-                log("💡 전송할 대상 기기가 없어 합본 생성을 건너뜁니다.")
+                # target_ips 는 위에서 비어 있지 않음 → pending 없음 = 이미 전 기기 전송 완료
+                log("💡 합본 대상 기사가 이미 모든 기기에 전송되어 합본 생성을 건너뜁니다.")
                 success_count = actual_work_sites
 
         except Exception as e:

@@ -185,6 +185,90 @@ def test_pipeline_all_empty_fetch_returns_false():
     assert svc.get_last_pipeline_result()["status"] == "empty_fetch"
 
 
+def test_pipeline_no_targets_returns_false():
+    cm = MagicMock(spec=ConfigManager)
+    cfg = _base_config([
+        {"name": "A", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
+    ])
+    cfg["x3_ip"] = ""
+    cfg["x3_devices"] = []
+    cm.load_config.return_value = cfg
+    cm.get_resolved_output_dir.return_value = "./output"
+
+    svc = SyncService(cm)
+    with patch.object(svc, "maybe_backup_pull", return_value={"skipped": True}):
+        with patch.object(svc, "maybe_backup_push", return_value={"skipped": True}):
+            with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+                result = svc.run_sync_pipeline()
+    assert result is False
+    assert svc.get_last_pipeline_result()["status"] == "no_targets"
+
+
+def test_daily_digest_already_synced_is_success():
+    """digest 모드에서 전 기기 이미 전송이면 성공(no work)으로 집계."""
+    cm = MagicMock(spec=ConfigManager)
+    cfg = _base_config([
+        {"name": "A", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
+    ])
+    cfg["epub_merge_mode"] = "daily_digest"
+    cm.load_config.return_value = cfg
+    cm.get_resolved_output_dir.return_value = "./output"
+
+    svc = SyncService(cm)
+    svc.db.needs_sync = MagicMock(return_value=True)
+    svc.db.is_synced_for_device = MagicMock(return_value=True)  # 이미 전부 전송
+    with patch.object(svc, "_reload_config"):
+        with patch.object(svc, "maybe_backup_pull", return_value={"skipped": True}):
+            with patch.object(svc, "maybe_backup_push", return_value={"skipped": True}):
+                with patch.object(ScraperFactory, "get_scraper") as mock_get:
+                    mock_get.return_value.fetch_articles.return_value = [
+                        {"title": "t", "content": "<p>x</p>", "url": "https://ex.com/1"},
+                    ]
+                    with patch.object(svc.epub_builder, "build_digest") as mock_digest:
+                        with patch.object(svc.uploader, "upload_to_targets") as mock_up:
+                            with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+                                result = svc.run_sync_pipeline()
+    assert result is True
+    mock_digest.assert_not_called()
+    mock_up.assert_not_called()
+
+
+def test_begin_sync_pipeline_async_rejects_when_busy():
+    cm = MagicMock(spec=ConfigManager)
+    cm.load_config.return_value = _base_config()
+    cm.get_resolved_output_dir.return_value = "./output"
+    svc = SyncService(cm)
+    assert svc._pipeline_lock.acquire(blocking=False)
+    try:
+        assert svc.begin_sync_pipeline_async() is False
+    finally:
+        svc._pipeline_lock.release()
+
+
+def test_begin_sync_pipeline_async_starts_and_releases():
+    import time
+
+    cm = MagicMock(spec=ConfigManager)
+    cm.load_config.return_value = _base_config()
+    cm.get_resolved_output_dir.return_value = "./output"
+    svc = SyncService(cm)
+    ran = threading.Event()
+
+    def body(*_a, **_k):
+        ran.set()
+        return True
+
+    with patch.object(svc, "_run_pipeline_body", side_effect=body):
+        assert svc.begin_sync_pipeline_async() is True
+        assert ran.wait(timeout=2)
+        # 백그라운드 종료 대기
+        for _ in range(40):
+            if not svc.is_pipeline_running():
+                break
+            time.sleep(0.05)
+        assert not svc.is_pipeline_running()
+
+
 def test_last_pipeline_result_is_instance_variable():
     """_last_pipeline_result가 인스턴스 변수로 각 인스턴스마다 독립되어야 함."""
     cm1 = MagicMock(spec=ConfigManager)
