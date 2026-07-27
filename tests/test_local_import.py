@@ -1,4 +1,8 @@
-"""dist 사이드카 JSON (synced_posts / 설정백업) 호환 테스트."""
+"""로컬 사이드카 JSON (synced_posts / 설정백업) 호환 테스트.
+
+dist/ 배포 폴더는 gitignore 이므로 CI·클론 환경에 없습니다.
+실제 dist 샘플과 동일한 스키마를 임시 파일로 만들어 검증합니다.
+"""
 from __future__ import annotations
 
 import json
@@ -13,51 +17,83 @@ from websync.config.manager import ConfigManager
 from websync.db.history import SyncHistoryDb
 from websync.upload.device_ids import build_targets_with_keys, resolve_pending_upload_ips
 
-REPO = Path(__file__).resolve().parents[1]
-DIST = REPO / "dist"
-DIST_HISTORY = DIST / "synced_posts.json"
-DIST_SITES_BACKUP = next(DIST.glob("260720*.json"), None)
+# dist 실물 샘플과 동일한 스키마 (kind 없는 레거시 설정 백업 포함)
+SAMPLE_HISTORY = {
+    "export_version": 1,
+    "kind": "synced_posts",
+    "exported_at": "2026-07-20T12:00:00",
+    "posts": [
+        {
+            "url": "https://blog.naver.com/example/1",
+            "device_ip": "crosspoint.local",
+            "site_name": "example",
+            "title": "첫 글",
+            "synced_at": "2026-07-20T10:00:00",
+        }
+    ],
+}
+
+# 레거시: kind 없음, sites 배열만 (예: dist 의 *설정백업*.json / 블로그 설정.json)
+SAMPLE_SITES_BACKUP = {
+    "export_version": 1,
+    "exported_at": "2026-07-14T20:50:47.348179",
+    "sites": [
+        {
+            "name": "예시 블로그",
+            "type": "rss",
+            "url": "https://blog.example/feed",
+            "limit": 5,
+            "enabled": True,
+        }
+    ],
+}
 
 
-def test_dist_synced_posts_format():
-    assert DIST_HISTORY.is_file(), "dist/synced_posts.json 필요"
-    with open(DIST_HISTORY, encoding="utf-8") as f:
-        payload = json.load(f)
-    posts, exported_at = extract_posts(payload)
-    assert payload.get("kind") == "synced_posts"
+def _write_json(path: Path, payload: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def test_synced_posts_format():
+    posts, exported_at = extract_posts(SAMPLE_HISTORY)
+    assert SAMPLE_HISTORY.get("kind") == "synced_posts"
     assert len(posts) >= 1
     assert posts[0].get("url")
     assert posts[0].get("device_ip")
     assert exported_at
 
 
-def test_dist_settings_backup_format():
-    assert DIST_SITES_BACKUP is not None and DIST_SITES_BACKUP.is_file()
-    with open(DIST_SITES_BACKUP, encoding="utf-8") as f:
-        payload = json.load(f)
-    sites, exported_at = extract_sites(payload)
-    # kind 없어도 sites 배열만 있으면 됨 (260720 설정백업.json)
-    assert "kind" not in payload or payload.get("kind") in (None, "sites")
+def test_settings_backup_format_without_kind():
+    sites, exported_at = extract_sites(SAMPLE_SITES_BACKUP)
+    # kind 없어도 sites 배열만 있으면 됨 (레거시 설정 백업)
+    assert "kind" not in SAMPLE_SITES_BACKUP or SAMPLE_SITES_BACKUP.get("kind") in (
+        None,
+        "sites",
+    )
     assert len(sites) >= 1
     assert sites[0].get("url")
     assert exported_at
 
 
-def test_import_dist_sidecars_into_fresh_local():
-    assert DIST_HISTORY.is_file()
-    assert DIST_SITES_BACKUP is not None
+def test_import_sidecars_into_fresh_local():
+    # Windows 에서 SQLite 핸들이 잡힌 채 TemporaryDirectory 정리하면 PermissionError
     tmp = tempfile.mkdtemp()
     try:
-        shutil.copy2(DIST_HISTORY, os.path.join(tmp, "synced_posts.json"))
-        shutil.copy2(DIST_SITES_BACKUP, os.path.join(tmp, DIST_SITES_BACKUP.name))
+        root = Path(tmp)
+        history_name = "synced_posts.json"
+        # 파일명에 '설정백업' 이 있으면 사이드카 후보로 인식
+        sites_name = "260720 설정백업.json"
+        _write_json(root / history_name, SAMPLE_HISTORY)
+        _write_json(root / sites_name, SAMPLE_SITES_BACKUP)
 
-        cm = ConfigManager(os.path.join(tmp, "config.json"))
+        cm = ConfigManager(str(root / "config.json"))
         cfg = cm.load_config()
         cfg["sites"] = []  # 비운 뒤 사이드카로 채움
         cm.save_config(cfg)
 
-        db = SyncHistoryDb(os.path.join(tmp, "history.db"))
-        result = import_local_sidecars(cm, db, root=tmp)
+        db = SyncHistoryDb(str(root / "history.db"))
+        result = import_local_sidecars(cm, db, root=str(root))
         assert result["ok"] is True
         assert result["history_changed"] > 0
         assert result["sites_changed"] is True
@@ -80,6 +116,8 @@ def test_import_dist_sidecars_into_fresh_local():
 
         cfg2 = cm.load_config()
         assert len(cfg2.get("sites") or []) >= 1
+        del db
+        del cm
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

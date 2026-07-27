@@ -129,11 +129,22 @@ Python 3.10+ 권장.
 ## 5. 테스트
 
 ```bash
-python -m pytest tests/ -q
+python -m pytest tests/ -q --tb=short -ra
 ```
 
 주요 영역: config, db, pipeline, scrapers(픽스처), epub, uploader, servers, process_lock, backup, scheduler 등.  
 대략 **150+** 케이스 (감사 수정·회귀 테스트 포함). 정확한 수는 `pytest --collect-only -q` 로 확인.
+
+### 허메틱(격리) 규칙 — CI 재발 방지
+
+단위 테스트는 **GitHub Actions 클린 체크아웃**에서도 동일하게 통과해야 합니다.
+
+| 하지 말 것 | 대신 할 것 |
+|-----------|-----------|
+| `dist/`, `output/`, `logs/`, 로컬 `config.json`, `*.db` 등 **gitignore 경로** 필수 가정 | `tempfile` / `tests/fixtures/` 에 스키마 샘플 작성 |
+| 개발 PC 에만 있는 배포 사이드카(`synced_posts.json`, `*설정백업*.json`) 읽기 | 동일 JSON 스키마를 테스트 코드·픽스처로 인라인 |
+
+가드 테스트: `tests/test_hermetic_suite.py` — 테스트 소스가 `dist/` 등을 하드코딩하면 실패합니다.
 
 ---
 
