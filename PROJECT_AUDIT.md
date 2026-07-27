@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary
 
-**Xteink X3 WebSync Manager**는 CrossPoint e-ink 기기를 위한 뉴스·콘텐츠 수집 → EPUB 빌드 → 무선 전송 데스크톱 앱입니다. SOLID 기반 패키지 분리, 스레드/프로세스 파이프라인 락, config 원자 저장 + revision CAS, 기기별 SQLite 이력, OPDS·웹 대시보드 인증, 클라우드 폴더 백업(`websync/backup`)까지 갖춘 **성숙도 높은** 코드베이스입니다.
+**Xteink X3 WebSync Manager**는 CrossPoint e-ink 기기를 위한 뉴스·콘텐츠 수집 → EPUB 빌드 → 무선 전송 데스크톱 앱입니다. SOLID 기반 패키지 분리, 스레드/프로세스 파이프라인 락, config 원자 저장 + revision CAS, 기기별 SQLite 이력, OPDS·웹 대시보드 인증, 공유 데이터 폴더 정본(`websync/backup` — OneDrive 등, `portable_data`)까지 갖춘 **성숙도 높은** 코드베이스입니다.
 
 - **전체 위험도**: **Medium-Low** (개인 PC·로컬 LAN 가정)  
   - LAN 공개(`allow_lan`)·멀티 PC 백업 동기화·API 키 평문 저장을 쓰는 환경에서는 **Medium**
@@ -60,7 +60,7 @@ websync/
   epub/                       # builder, css, cover, sanitize, themes
   upload/                     # uploader, device_client, host, remote_path
   pipeline/                   # SyncService + sync/preview/selected/AI
-  backup/                     # 클라우드 폴더 sites/history JSON pull/push
+  backup/                     # 공유 데이터 폴더 sites/history JSON 정본 pull/push + 로컬 사이드카 import
   integrations/               # Calibre, ToastNotifier
   scheduler/                  # schtasks / launchd / crontab
   servers/                    # OPDS + dashboard/

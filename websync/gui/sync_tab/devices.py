@@ -58,7 +58,9 @@ class SyncDevicesMixin:
             if name == "기본 기기" or any(d.get("name") == name for d in devices):
                 messagebox.showwarning("중복", "이미 사용 중인 기기 이름입니다.", parent=dialog)
                 return
-            devices.append({"name": name, "ip": ip})
+            from websync.upload.device_ids import new_device_id
+
+            devices.append({"name": name, "ip": ip, "id": new_device_id()})
             if not self.app._safe_save_config(config, parent=dialog, reload=True):
                 return
             self._refresh_devices_tree()

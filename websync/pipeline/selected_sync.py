@@ -52,6 +52,11 @@ def sync_selected_articles(
         upload_targets = service.uploader._build_target_list()
         target_ips = [d["ip"] for d in upload_targets]
         ip_to_name = {d["ip"]: d["name"] for d in upload_targets}
+        from websync.backup.portable_cfg import get_portable_cfg
+        from websync.upload.device_ids import ip_to_history_key_map, resolve_pending_upload_ips
+
+        ip_hist_map = ip_to_history_key_map(upload_targets)
+        history_mode = get_portable_cfg(service.config).get("history_mode", "per_device")
         epub_merge_mode = service.config.get("epub_merge_mode", "per_site")
 
         if not target_ips:
@@ -102,13 +107,13 @@ def sync_selected_articles(
                 for art in arts:
                     all_urls.append((art["url"], site_name, art.get("title", "")))
 
-            pending_ips = []
-            pending_set: set[str] = set()
-            for ip in target_ips:
-                if any(not service.db.is_synced_for_device(url, ip) for url, _, _ in all_urls):
-                    if ip not in pending_set:
-                        pending_set.add(ip)
-                        pending_ips.append(ip)
+            pending_ips = resolve_pending_upload_ips(
+                service.db.is_synced_for_device,
+                service.db.is_synced,
+                [url for url, _, _ in all_urls],
+                upload_targets,
+                history_mode=history_mode,
+            )
 
             if pending_ips:
                 epub_path = service.epub_builder.build_digest(articles_by_site, generate_cover=generate_cover)
@@ -123,6 +128,7 @@ def sync_selected_articles(
                         upload_results,
                         all_urls,
                         is_synced_for_device=service.db.is_synced_for_device,
+                        ip_to_history_key=ip_hist_map,
                     )
                     if batch:
                         service.db.mark_synced_many(batch)
@@ -144,13 +150,13 @@ def sync_selected_articles(
                 if progress_callback:
                     progress_callback(idx, actual_work)
 
-                pending_ips = []
-                pending_set: set[str] = set()
-                for ip in target_ips:
-                    if any(not service.db.is_synced_for_device(art["url"], ip) for art in arts):
-                        if ip not in pending_set:
-                            pending_set.add(ip)
-                            pending_ips.append(ip)
+                pending_ips = resolve_pending_upload_ips(
+                    service.db.is_synced_for_device,
+                    service.db.is_synced,
+                    [art["url"] for art in arts],
+                    upload_targets,
+                    history_mode=history_mode,
+                )
 
                 if not pending_ips:
                     log(f"💡 [{site_name}] 이미 전송 완료되어 건너뜁니다.")
@@ -170,6 +176,7 @@ def sync_selected_articles(
                         arts,
                         site_name=site_name,
                         is_synced_for_device=service.db.is_synced_for_device,
+                        ip_to_history_key=ip_hist_map,
                     )
                     if batch:
                         service.db.mark_synced_many(batch)

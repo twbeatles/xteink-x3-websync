@@ -1,4 +1,9 @@
-"""OneDrive 등 클라우드 폴더 백업 동기화 서비스."""
+"""공유 데이터 폴더(OneDrive 등) 사이트·이력 정본 동기화 서비스.
+
+로컬 SQLite(`sync_history.db`)와 `config.json`의 sites 는 작업 캐시이고,
+공유 폴더의 sites.json / synced_posts.json 이 정본입니다.
+SQLite 파일을 공유 폴더에 직접 두지 마세요.
+"""
 from __future__ import annotations
 
 import logging
@@ -21,6 +26,7 @@ from websync.backup.format import (
     merge_sites,
     now_iso,
 )
+from websync.backup.portable_cfg import apply_portable_cfg, get_portable_cfg
 from websync.config.manager import ConfigManager
 from websync.core.paths import resolve_path
 from websync.core.process_lock import ProcessFileLock
@@ -28,11 +34,11 @@ from websync.db.history import SyncHistoryDb, SyncHistoryDbError
 
 
 class BackupSyncError(Exception):
-    """백업 동기화 실패"""
+    """공유 데이터 폴더 동기화 실패"""
 
 
 class BackupSyncService:
-    """사이트 설정 + 전송 이력을 포터블 JSON으로 pull/push 합니다."""
+    """사이트 설정 + 전송 이력을 공유 폴더 JSON 정본으로 pull/push 합니다."""
 
     def __init__(
         self,
@@ -50,9 +56,9 @@ class BackupSyncService:
         return self.config_manager.load_config()
 
     def _backup_cfg(self, config: dict | None = None) -> dict:
+        """portable_data (+ backup_sync 하위 호환) 설정."""
         cfg = config if config is not None else self._load_config()
-        bs = cfg.get("backup_sync")
-        return bs if isinstance(bs, dict) else {}
+        return get_portable_cfg(cfg)
 
     def get_folder(self, config: dict | None = None) -> str:
         folder = (self._backup_cfg(config).get("folder") or "").strip()
@@ -68,11 +74,7 @@ class BackupSyncService:
         return self.is_enabled(cfg) and bool(self.get_folder(cfg))
 
     def _update_backup_meta(self, config: dict, **kwargs) -> dict:
-        bs = config.setdefault("backup_sync", {})
-        if not isinstance(bs, dict):
-            bs = {}
-            config["backup_sync"] = bs
-        bs.update(kwargs)
+        apply_portable_cfg(config, kwargs)
         return config
 
     def pull(self, *, force: bool = False) -> dict[str, Any]:

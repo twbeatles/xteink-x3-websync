@@ -20,7 +20,7 @@ xteink-x3-websync/
 │   ├── epub/                 # builder + css/cover/sanitize + themes/
 │   ├── upload/               # uploader, device_client, host, remote_path
 │   ├── pipeline/             # service 파사드 + sync/preview/selected
-│   ├── backup/               # 클라우드 백업 (sites.json + synced_posts.json)
+│   ├── backup/               # 공유 데이터 폴더 정본 (sites.json + synced_posts.json)
 │   ├── integrations/         # Calibre, ToastNotifier
 │   ├── scheduler/            # schtasks / launchd / crontab
 │   ├── servers/              # OPDS + web dashboard
@@ -147,6 +147,11 @@ pyinstaller x3_websync.spec
 결과: `dist/x3_websync.exe` (GUI, 콘솔 없음).
 
 EXE는 실행 파일과 같은 폴더에 `config.json`, `sync_history.db`, `logs/`, `output/` 을 둡니다.
+
+공유 데이터 폴더(`portable_data` / 하위 호환 `backup_sync`): 사이트·이력 **정본**은 OneDrive 등 폴더의 `sites.json` + `synced_posts.json` 입니다. 로컬 `sync_history.db` 는 작업 캐시이며 클라우드 경로에 직접 두지 마세요. 이력 모드 `history_mode`: `per_device` | `global_url`.
+
+**로컬 사이드카 이어받기** (`websync/backup/local_import.py`): 실행 폴더의 `synced_posts.json`, `sites.json`, `*설정백업*.json`(kind 없는 레거시 sites export 포함)을 앱 기동 시 `import_posts_union` / `merge_sites` 로 반영합니다.  
+단일 기기일 때 이력 `device_ip` 가 `crosspoint.local` 이고 현재 주소가 LAN IP여도 재전송하지 않습니다 (`needs_sync` 단일 기기 호환 + alias_keys).
 
 **스펙에서 제외되는 선택 기능** (`x3_websync.spec` excludes):
 

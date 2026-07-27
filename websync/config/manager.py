@@ -31,11 +31,12 @@ class ConfigManager:
         "fetch_detail_page": False,
     }
 
-    CONFIG_VERSION = 2
+    CONFIG_VERSION = 3
 
     DEFAULT_CONFIG = {
         "config_version": CONFIG_VERSION,
         "x3_ip": "crosspoint.local",
+        "x3_primary_device_id": "",
         "x3_devices": [],
         "output_dir": "./output",
         "calibre_path": "C:\\Program Files\\Calibre2\\calibredb.exe",
@@ -113,6 +114,21 @@ class ConfigManager:
             "cleanup_older_days": 14,
             "warn_overwrite": True
         },
+        # 공유 데이터 폴더 (OneDrive 등) — 사이트·이력 정본
+        "portable_data": {
+            "enabled": False,
+            "folder": "",
+            "include_history": True,
+            "auto_export": True,
+            "auto_import_on_start": True,
+            "history_mode": "per_device",
+            "wizard_completed": False,
+            "last_sites_push_at": "",
+            "last_history_push_at": "",
+            "last_sync_at": "",
+            "last_sync_message": "",
+        },
+        # 하위 호환: portable_data 와 공통 필드 미러
         "backup_sync": {
             "enabled": False,
             "folder": "",
@@ -198,6 +214,16 @@ class ConfigManager:
             updated = True
 
         if self._ensure_opds_api_key(config):
+            updated = True
+
+        # portable_data ← backup_sync 이관 및 양방향 미러
+        from websync.backup.portable_cfg import migrate_portable_into_config
+        from websync.upload.device_ids import ensure_device_ids_in_config
+
+        if migrate_portable_into_config(config):
+            updated = True
+
+        if ensure_device_ids_in_config(config):
             updated = True
 
         if config.get("config_version", 0) < self.CONFIG_VERSION:

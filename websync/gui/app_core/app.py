@@ -70,14 +70,36 @@ class SyncAppGui(
         self._load_config_to_ui()
 
         self.root.after(0, lambda w=init_w, h=init_h: self._finalize_layout(w, h))
-        self.root.after(300, self._start_backup_pull_if_enabled)
+        self.root.after(200, self._maybe_show_portable_wizard)
+        self.root.after(400, self._start_backup_pull_if_enabled)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _start_backup_pull_if_enabled(self):
-        """시작 시 클라우드 백업 폴더에서 사이트/이력을 백그라운드로 가져옵니다."""
-        bs = self.service.config.get("backup_sync") if isinstance(self.service.config, dict) else {}
-        if not isinstance(bs, dict):
+    def _maybe_show_portable_wizard(self):
+        """첫 실행 시 공유 데이터 폴더 연결 마법사."""
+        from websync.gui.portable_wizard import PortableDataWizard, should_show_portable_wizard
+
+        cfg = self.service.config if isinstance(self.service.config, dict) else {}
+        if not should_show_portable_wizard(cfg):
             return
+
+        def after_wizard():
+            try:
+                self._load_config_to_ui()
+                self.tab_sync._refresh_site_tree()
+                self.tab_history._refresh_history()
+                if hasattr(self.tab_settings, "_refresh_backup_status_label"):
+                    self.tab_settings._refresh_backup_status_label()
+            except Exception:
+                pass
+
+        wizard = PortableDataWizard(self.root, self.service, on_done=after_wizard)
+        wizard.show()
+
+    def _start_backup_pull_if_enabled(self):
+        """시작 시 공유 데이터 폴더에서 사이트/이력을 백그라운드로 가져옵니다."""
+        from websync.backup.portable_cfg import get_portable_cfg
+
+        bs = get_portable_cfg(self.service.config if isinstance(self.service.config, dict) else {})
         if not (bs.get("enabled") and bs.get("auto_import_on_start", True) and (bs.get("folder") or "").strip()):
             return
 
@@ -97,11 +119,11 @@ class SyncAppGui(
                         pass
                     msg = result.get("message") or ""
                     if msg and (result.get("sites_changed") or result.get("history_changed")):
-                        self._log_message(f"☁ 시작 시 백업 가져오기: {msg}")
+                        self._log_message(f"☁ 시작 시 공유 데이터 가져오기: {msg}")
 
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, lambda: self._log_message(f"☁ 시작 시 백업 가져오기 실패: {e}"))
+                self.root.after(0, lambda: self._log_message(f"☁ 시작 시 공유 데이터 가져오기 실패: {e}"))
 
         threading.Thread(target=task, daemon=True).start()
 

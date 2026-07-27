@@ -48,6 +48,32 @@ def test_needs_sync_per_device():
         _cleanup_db(db, path)
 
 
+def test_needs_sync_global_url_mode():
+    db, path = _make_db()
+    try:
+        url = "https://example.com/global"
+        db.mark_synced(url, "site", "title", device_ip="10.0.0.1")
+        # 다른 기기 키가 대상이어도 URL 이력이 있으면 스킵
+        assert not db.needs_sync(
+            url, ["10.0.0.2", "10.0.0.3"], history_mode="global_url"
+        )
+        assert db.pending_device_ips(url, ["10.0.0.2"], history_mode="global_url") == []
+        assert db.needs_sync(
+            "https://example.com/new",
+            ["10.0.0.2"],
+            history_mode="global_url",
+        )
+        assert db.pending_device_ips(
+            "https://example.com/new", ["10.0.0.2", "10.0.0.3"], history_mode="global_url"
+        ) == ["10.0.0.2", "10.0.0.3"]
+        # per_device + 다중 기기: 미전송 기기 존재
+        assert db.needs_sync(url, ["10.0.0.2", "10.0.0.3"], history_mode="per_device")
+        # per_device + 단일 기기: device_ip 불일치여도 URL 이력 있으면 스킵
+        assert not db.needs_sync(url, ["10.0.0.2"], history_mode="per_device")
+    finally:
+        _cleanup_db(db, path)
+
+
 def test_legacy_migration():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)

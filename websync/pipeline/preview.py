@@ -48,9 +48,15 @@ def preview_articles(
             x3_ip=config.get("x3_ip", "crosspoint.local"),
             devices=config.get("x3_devices", []),
             remote_dir=df.get("default_upload_path", "/"),
+            primary_device_id=config.get("x3_primary_device_id", "") or "",
         )
         upload_targets = uploader._build_target_list()
-        target_ips = [d["ip"] for d in upload_targets]
+        from websync.backup.portable_cfg import get_portable_cfg
+        from websync.upload.device_ids import alias_key_groups, history_keys_from_targets
+
+        target_history_keys = history_keys_from_targets(upload_targets)
+        key_aliases = alias_key_groups(upload_targets)
+        history_mode = get_portable_cfg(config).get("history_mode", "per_device")
         preview_results = []
 
         for site_idx, site in enumerate(enabled_sites):
@@ -78,7 +84,12 @@ def preview_articles(
                     url = art.get("url")
                     if not url:
                         continue
-                    if service.db.needs_sync(url, target_ips):
+                    if service.db.needs_sync(
+                        url,
+                        target_history_keys,
+                        history_mode=history_mode,
+                        key_aliases=key_aliases,
+                    ):
                         new_articles.append(art)
 
                 log(f"   => 수집: {len(articles)}건 (신규 검출: {len(new_articles)}건)")

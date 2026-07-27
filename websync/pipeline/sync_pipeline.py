@@ -10,6 +10,13 @@ from websync.db.history import SyncHistoryDbError
 from websync.pipeline.summarizer import Summarizer
 from websync.pipeline.translator import Translator
 from websync.pipeline.article_keys import article_sync_key
+from websync.backup.portable_cfg import get_portable_cfg
+from websync.upload.device_ids import (
+    alias_key_groups,
+    history_keys_from_targets,
+    ip_to_history_key_map,
+    resolve_pending_upload_ips,
+)
 from websync.pipeline.upload_results import (
     collect_mark_entries,
     collect_mark_entries_from_triples,
@@ -51,7 +58,12 @@ def run_sync_pipeline_locked(
     generate_cover = service.config.get("epub_cover", True)
     upload_targets = service.uploader._build_target_list()
     target_ips = [d["ip"] for d in upload_targets]
+    target_history_keys = history_keys_from_targets(upload_targets)
+    key_aliases = alias_key_groups(upload_targets)
     ip_to_name = {d["ip"]: d["name"] for d in upload_targets}
+    ip_hist_map = ip_to_history_key_map(upload_targets)
+    history_mode = get_portable_cfg(service.config).get("history_mode", "per_device")
+    log(f"📋 이력 모드: {history_mode}")
 
     if not target_ips:
         log("⚠️ 등록된 전송 기기가 없습니다. X3 주소 또는 추가 기기를 설정해 주세요.")
@@ -63,9 +75,10 @@ def run_sync_pipeline_locked(
         service._last_pipeline_result = {"status": "no_targets", "success": False}
         return False
 
-    # 레거시 device_ip='*' 이력을 기본 기기로 1회 이관
+    # 레거시 device_ip='*' 이력을 기본 기기 이력 키로 1회 이관
     try:
-        remapped = service.db.remap_legacy_star_to_device(target_ips[0])
+        legacy_key = target_history_keys[0] if target_history_keys else target_ips[0]
+        remapped = service.db.remap_legacy_star_to_device(legacy_key)
         if remapped:
             log(f"🔄 레거시 동기화 이력 {remapped}건을 [{ip_to_name.get(target_ips[0], target_ips[0])}]로 이관했습니다.")
     except SyncHistoryDbError as e:
@@ -106,7 +119,12 @@ def run_sync_pipeline_locked(
                 url = art.get("url")
                 if not url:
                     continue
-                if service.db.needs_sync(url, target_ips):
+                if service.db.needs_sync(
+                    url,
+                    target_history_keys,
+                    history_mode=history_mode,
+                    key_aliases=key_aliases,
+                ):
                     new_articles.append(art)
 
             skipped = len(articles) - len(new_articles)
@@ -137,13 +155,13 @@ def run_sync_pipeline_locked(
             else:
                 # 기존 방식: 사이트별 개별 빌드 및 전송
                 # 이번 배치 중 하나라도 미전송인 기기만 업로드 대상
-                pending_ips = []
-                pending_set = set()
-                for ip in target_ips:
-                    if any(not service.db.is_synced_for_device(art["url"], ip) for art in new_articles):
-                        if ip not in pending_set:
-                            pending_set.add(ip)
-                            pending_ips.append(ip)
+                pending_ips = resolve_pending_upload_ips(
+                    service.db.is_synced_for_device,
+                    service.db.is_synced,
+                    [art["url"] for art in new_articles],
+                    upload_targets,
+                    history_mode=history_mode,
+                )
 
                 if not pending_ips:
                     log(f"   => 💡 [{name}] 전송할 대상 기기가 없습니다.")
@@ -176,6 +194,7 @@ def run_sync_pipeline_locked(
                         new_articles,
                         site_name=name,
                         is_synced_for_device=service.db.is_synced_for_device,
+                        ip_to_history_key=ip_hist_map,
                     )
                     if batch:
                         service.db.mark_synced_many(batch)
@@ -214,13 +233,13 @@ def run_sync_pipeline_locked(
                     all_new_urls.append((art["url"], site_name, art.get("title", "")))
 
             # 이번 배치 기사 중 미전송된 기기가 있는 기기 추출
-            pending_ips = []
-            pending_set = set()
-            for ip in target_ips:
-                if any(not service.db.is_synced_for_device(url, ip) for url, _, _ in all_new_urls):
-                    if ip not in pending_set:
-                        pending_set.add(ip)
-                        pending_ips.append(ip)
+            pending_ips = resolve_pending_upload_ips(
+                service.db.is_synced_for_device,
+                service.db.is_synced,
+                [url for url, _, _ in all_new_urls],
+                upload_targets,
+                history_mode=history_mode,
+            )
 
             if pending_ips:
                 log(f"📚 합본 문서 제작 중... (총 {len(digest_articles)}개 사이트, {len(all_new_urls)}개 기사)")
@@ -245,6 +264,7 @@ def run_sync_pipeline_locked(
                         upload_results,
                         all_new_urls,
                         is_synced_for_device=service.db.is_synced_for_device,
+                        ip_to_history_key=ip_hist_map,
                     )
                     if batch:
                         service.db.mark_synced_many(batch)

@@ -11,6 +11,7 @@ import requests
 
 from websync.upload.host import normalize_device_host
 from websync.upload.remote_path import normalize_upload_remote_dir
+from websync.upload.device_ids import build_targets_with_keys
 
 __all__ = ["X3Uploader", "normalize_device_host", "normalize_upload_remote_dir"]
 
@@ -23,9 +24,12 @@ class X3Uploader:
         x3_ip: str,
         devices: Optional[list] = None,
         remote_dir: str | None = None,
+        *,
+        primary_device_id: str = "",
     ):
         self.x3_ip = normalize_device_host(x3_ip)
         self.devices = devices or []
+        self.primary_device_id = (primary_device_id or "").strip()
         self.remote_dir = normalize_upload_remote_dir(remote_dir)
         # 최근 전송 실패 사유 {ip: message} — GUI/파이프라인 로그용
         self.last_errors: dict[str, str] = {}
@@ -108,24 +112,15 @@ class X3Uploader:
             return False
 
     def _build_target_list(self) -> list[dict]:
-        """전송 대상 기기 목록 (기본 기기 + x3_devices, 중복 IP 제거)"""
-        targets: list[dict] = []
-        seen_ips: set[str] = set()
+        """전송 대상 기기 목록 (기본 기기 + x3_devices, 중복 IP 제거).
 
-        if self.x3_ip:
-            ip = normalize_device_host(self.x3_ip)
-            if ip:
-                targets.append({"name": "기본 기기", "ip": ip})
-                seen_ips.add(ip)
-
-        for dev in self.devices:
-            ip = normalize_device_host(dev.get("ip") or "")
-            if not ip or ip in seen_ips:
-                continue
-            targets.append({"name": dev.get("name") or ip, "ip": ip})
-            seen_ips.add(ip)
-
-        return targets
+        각 항목: name, ip, id, history_key (이력 DB 키 — 안정 id 또는 IP).
+        """
+        return build_targets_with_keys(
+            self.x3_ip,
+            self.devices,
+            primary_id=self.primary_device_id,
+        )
 
     def upload(self, file_path: str, remote_dir: str | None = None) -> bool:
         """메인 기기(x3_ip)로 파일 전송"""

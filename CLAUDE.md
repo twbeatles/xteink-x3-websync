@@ -59,8 +59,10 @@ xteink-x3-websync/
 │   │   ├── article_keys.py    # 기사 URL 키
 │   │   ├── summarizer.py      # AI 요약
 │   │   └── translator.py      # 번역
-│   ├── backup/                # 클라우드 백업 (sites.json + synced_posts.json)
-│   │   ├── service.py         # BackupSyncService pull/push
+│   ├── backup/                # 공유 데이터 폴더 정본 (sites.json + synced_posts.json)
+│   │   ├── service.py         # BackupSyncService / PortableDataService pull/push
+│   │   ├── portable_cfg.py    # portable_data ↔ backup_sync 호환
+│   │   ├── local_import.py    # 실행 폴더 synced_posts·설정백업 JSON 이어받기
 │   │   ├── atomic_io.py / format.py
 │   ├── integrations/
 │   │   ├── calibre.py         # calibredb.exe 래퍼
@@ -156,13 +158,16 @@ main()
   "font_size": 16,
   "line_height": 1.7,
   "epub_cover": true,
-  "backup_sync": {
+  "portable_data": {
     "enabled": false,
     "folder": "",
     "include_history": true,
     "auto_export": true,
-    "auto_import_on_start": true
+    "auto_import_on_start": true,
+    "history_mode": "per_device",
+    "wizard_completed": false
   },
+  "backup_sync": { "...": "portable_data 와 공통 필드 미러 (하위 호환)" },
   "sites": [
     {
       "name": "사이트명",

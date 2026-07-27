@@ -30,6 +30,23 @@ class SyncService:
         self._backup_push_timer: threading.Timer | None = None
         self._backup_timer_lock = threading.Lock()
         self._apply_config_to_components()
+        # dist 등과 함께 둔 synced_posts.json / *설정백업*.json 이어받기
+        self._import_local_sidecars_once()
+
+    def _import_local_sidecars_once(self) -> None:
+        """실행 폴더의 레거시 JSON 이력을 로컬 DB·사이트에 합집합 반영."""
+        try:
+            from websync.backup.local_import import import_local_sidecars
+
+            result = import_local_sidecars(
+                self.config_manager, self.db, logger=self.logger
+            )
+            if result.get("history_changed") or result.get("sites_changed"):
+                self._reload_config()
+                for msg in result.get("messages") or []:
+                    self.logger.info(f"[portable] {msg}")
+        except Exception as e:
+            self.logger.warning(f"[portable] 로컬 사이드카 JSON 가져오기 건너뜀: {e}")
 
     def _apply_config_to_components(self):
         self.epub_builder = EpubBuilder(
@@ -45,6 +62,7 @@ class SyncService:
             x3_ip=self.config.get("x3_ip", "crosspoint.local"),
             devices=self.config.get("x3_devices", []),
             remote_dir=df.get("default_upload_path", "/"),
+            primary_device_id=self.config.get("x3_primary_device_id", "") or "",
         )
 
     def is_pipeline_running(self) -> bool:
@@ -61,11 +79,11 @@ class SyncService:
         self._apply_config_to_components()
 
     def _backup_cfg(self) -> dict:
-        bs = self.config.get("backup_sync") if isinstance(self.config, dict) else None
-        if not isinstance(bs, dict):
+        from websync.backup.portable_cfg import get_portable_cfg
+
+        if not isinstance(self.config, dict):
             self._reload_config()
-            bs = self.config.get("backup_sync")
-        return bs if isinstance(bs, dict) else {}
+        return get_portable_cfg(self.config if isinstance(self.config, dict) else {})
 
     def maybe_backup_pull(
         self,
@@ -73,20 +91,20 @@ class SyncService:
         force: bool = False,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> dict:
-        """시작/파이프라인 전 클라우드 → 로컬 가져오기."""
+        """시작/파이프라인 전 공유 데이터 폴더 → 로컬 캐시 가져오기."""
         self._reload_config()
         bs = self._backup_cfg()
         if not force and not (bs.get("enabled") and bs.get("auto_import_on_start", True)):
             return {"ok": True, "skipped": True, "message": "자동 가져오기 비활성"}
         if not self.backup_sync.is_configured() and not force:
-            return {"ok": True, "skipped": True, "message": "백업 동기화 미설정"}
+            return {"ok": True, "skipped": True, "message": "공유 데이터 폴더 미설정"}
         result = self.backup_sync.pull(force=force)
         self._reload_config()
         msg = result.get("message") or ""
         if msg and not result.get("skipped"):
-            self.logger.info(f"[backup] pull: {msg}")
+            self.logger.info(f"[portable] pull: {msg}")
             if log_callback:
-                log_callback(f"☁ 백업 가져오기: {msg}")
+                log_callback(f"☁ 공유 데이터 가져오기: {msg}")
         return result
 
     def maybe_backup_push(
@@ -95,20 +113,20 @@ class SyncService:
         force: bool = False,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> dict:
-        """파이프라인/사이트 변경 후 로컬 → 클라우드 내보내기."""
+        """파이프라인/사이트 변경 후 로컬 → 공유 데이터 폴더 내보내기."""
         self._reload_config()
         bs = self._backup_cfg()
         if not force and not (bs.get("enabled") and bs.get("auto_export", True)):
             return {"ok": True, "skipped": True, "message": "자동 내보내기 비활성"}
         if not self.backup_sync.is_configured() and not force:
-            return {"ok": True, "skipped": True, "message": "백업 동기화 미설정"}
+            return {"ok": True, "skipped": True, "message": "공유 데이터 폴더 미설정"}
         result = self.backup_sync.push(force=force)
         self._reload_config()
         msg = result.get("message") or ""
         if msg and not result.get("skipped"):
-            self.logger.info(f"[backup] push: {msg}")
+            self.logger.info(f"[portable] push: {msg}")
             if log_callback:
-                log_callback(f"☁ 백업 내보내기: {msg}")
+                log_callback(f"☁ 공유 데이터 내보내기: {msg}")
         return result
 
     def schedule_backup_push(self, delay: float = 1.5) -> None:
@@ -123,7 +141,7 @@ class SyncService:
             try:
                 self.maybe_backup_push()
             except Exception as e:
-                self.logger.warning(f"[backup] 예약 내보내기 실패: {e}")
+                self.logger.warning(f"[portable] 예약 내보내기 실패: {e}")
 
         with self._backup_timer_lock:
             if self._backup_push_timer is not None:
@@ -140,7 +158,7 @@ class SyncService:
         self,
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> dict:
-        """수동 양방향 동기화."""
+        """수동 양방향 공유 데이터 동기화."""
         result = self.backup_sync.sync_now()
         self._reload_config()
         msg_parts = []
@@ -152,9 +170,9 @@ class SyncService:
             msg_parts.append(f"내보내기: {push['message']}")
         msg = " | ".join(msg_parts) if msg_parts else result.get("message", "")
         if msg:
-            self.logger.info(f"[backup] sync_now: {msg}")
+            self.logger.info(f"[portable] sync_now: {msg}")
             if log_callback:
-                log_callback(f"☁ 백업 동기화: {msg}")
+                log_callback(f"☁ 공유 데이터 동기화: {msg}")
         return result
 
     @staticmethod

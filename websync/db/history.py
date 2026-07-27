@@ -4,6 +4,15 @@ import threading
 from websync.core.paths import PROJECT_ROOT, resolve_path
 
 LEGACY_DEVICE_IP = "*"
+HISTORY_MODE_PER_DEVICE = "per_device"
+HISTORY_MODE_GLOBAL_URL = "global_url"
+
+
+def _normalize_history_mode(value: str | None) -> str:
+    text = (str(value) if value is not None else "").strip().lower()
+    if text in (HISTORY_MODE_PER_DEVICE, HISTORY_MODE_GLOBAL_URL):
+        return text
+    return HISTORY_MODE_PER_DEVICE
 
 
 class SyncHistoryDbError(Exception):
@@ -11,7 +20,11 @@ class SyncHistoryDbError(Exception):
 
 
 class SyncHistoryDb:
-    """기기별 동기화 이력을 관리하는 SQLite DB 클래스"""
+    """기기별 동기화 이력을 관리하는 SQLite DB 클래스.
+
+    로컬 작업용 캐시 DB입니다. OneDrive 등 공유 폴더에는 JSON 정본을 쓰며
+    이 파일을 클라우드 경로에 직접 두지 마세요.
+    """
     _db_lock = threading.Lock()
 
     def __init__(self, db_path: str | None = None):
@@ -90,24 +103,96 @@ class SyncHistoryDb:
             except Exception as e:
                 raise SyncHistoryDbError(f"DB 조회 실패: {e}") from e
 
-    def needs_sync(self, url: str, target_ips: list[str]) -> bool:
-        """하나라도 미전송 기기가 있으면 True."""
+    def is_synced_for_any_key(self, url: str, keys: list[str]) -> bool:
+        """여러 이력 키(안정 id / IP / 예전 호스트) 중 하나라도 있으면 True."""
         if not url:
             return False
-        if not target_ips:
-            return not self.is_synced(url)
-        return any(not self.is_synced_for_device(url, ip) for ip in target_ips)
+        for key in keys:
+            k = (key or "").strip()
+            if k and self.is_synced_for_device(url, k):
+                return True
+        return False
 
-    def pending_device_ips(self, url: str, target_ips: list[str]) -> list[str]:
-        """아직 전송되지 않은 기기 IP 목록.
+    def needs_sync(
+        self,
+        url: str,
+        target_ips: list[str],
+        *,
+        history_mode: str = HISTORY_MODE_PER_DEVICE,
+        key_aliases: list[list[str]] | None = None,
+    ) -> bool:
+        """미전송이 있으면 True.
+
+        history_mode:
+          - per_device: 대상 기기 키 중 하나라도 미전송이면 True
+          - global_url: URL 이력이 하나라도 있으면 False (전역 스킵)
+        target_ips 는 실제로는 이력 키 목록(안정 device id 또는 IP)일 수 있습니다.
+        key_aliases: 기기별 후보 키 목록 (id·현재 IP·과거 host). 있으면 target_ips 대신 사용.
+        단일 기기(대상 1개)일 때: 예전에 crosspoint.local 등으로 기록된 이력이
+        현재 IP와 달라도 URL 이력이 있으면 스킵 (단일 기기 호환).
+        """
+        if not url:
+            return False
+        mode = _normalize_history_mode(history_mode)
+        if mode == HISTORY_MODE_GLOBAL_URL:
+            return not self.is_synced(url)
+
+        groups: list[list[str]]
+        if key_aliases:
+            groups = [list(g) for g in key_aliases if g]
+        else:
+            groups = [[ip] for ip in target_ips if ip]
+
+        if not groups:
+            return not self.is_synced(url)
+
+        # 단일 기기: device_ip 가 바뀌어도 (crosspoint.local → LAN IP) 기존 이력 유지
+        if len(groups) == 1 and self.is_synced(url):
+            return False
+
+        return any(not self.is_synced_for_any_key(url, g) for g in groups)
+
+    def pending_device_ips(
+        self,
+        url: str,
+        target_ips: list[str],
+        *,
+        history_mode: str = HISTORY_MODE_PER_DEVICE,
+        key_aliases: list[list[str]] | None = None,
+    ) -> list[str]:
+        """아직 전송되지 않은 기기 키 목록.
 
         target_ips 가 비어 있으면 전송 대상이 없으므로 항상 빈 목록을 반환합니다.
+        global_url 모드에서는 URL 이력이 있으면 빈 목록, 없으면 전체 대상.
+        key_aliases 가 있으면 각 그룹의 대표 키(첫 항목)를 반환 목록에 사용하고,
+        매칭은 그룹 전체로 합니다.
         """
         if not url:
             return []
-        if not target_ips:
+        mode = _normalize_history_mode(history_mode)
+
+        groups: list[list[str]]
+        if key_aliases:
+            groups = [list(g) for g in key_aliases if g]
+        else:
+            groups = [[ip] for ip in target_ips if ip]
+
+        if not groups:
             return []
-        return [ip for ip in target_ips if not self.is_synced_for_device(url, ip)]
+
+        if mode == HISTORY_MODE_GLOBAL_URL:
+            if self.is_synced(url):
+                return []
+            return [(g[0] if g else "") for g in groups if g]
+
+        if len(groups) == 1 and self.is_synced(url):
+            return []
+
+        pending: list[str] = []
+        for g in groups:
+            if not self.is_synced_for_any_key(url, g):
+                pending.append(g[0])
+        return pending
 
     def is_synced(self, url: str) -> bool:
         """URL에 동기화 이력이 존재하는지 (레거시·기기별 포함)."""

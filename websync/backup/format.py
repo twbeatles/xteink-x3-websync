@@ -81,7 +81,12 @@ def build_manifest(
 
 
 def extract_sites(payload: Any) -> tuple[list[dict], str | None]:
-    """sites.json 또는 레거시 export 파일에서 (sites, exported_at) 추출."""
+    """sites.json 또는 레거시 export 파일에서 (sites, exported_at) 추출.
+
+    지원 형식:
+    - 표준: {export_version, kind?, exported_at, sites: [...]}
+    - 레거시 설정 백업(예: ``260720 설정백업.json``): kind 없음, sites 배열만 있으면 됨
+    """
     if not isinstance(payload, dict):
         return [], None
     sites = payload.get("sites")
@@ -95,6 +100,12 @@ def extract_sites(payload: Any) -> tuple[list[dict], str | None]:
 
 
 def extract_posts(payload: Any) -> tuple[list[dict], str | None]:
+    """synced_posts.json 이력 추출.
+
+    지원 형식:
+    - 표준: {export_version, kind: synced_posts, exported_at, posts: [...]}
+    - 각 post: url, device_ip, site_name, title, synced_at
+    """
     if not isinstance(payload, dict):
         return [], None
     posts = payload.get("posts")
