@@ -101,16 +101,20 @@ python -m pytest tests/test_scraper_fixtures.py tests/test_brunch_scraper.py -q
 | 동기화 이력 | URL + `device_ip` 단위, 성공 기기만 기록 |
 | 부분 재시도 | 미수신 기기만 재업로드 |
 | GUI ↔ `--sync` | 프로세스 파일 락으로 직렬화 |
+| 프리뷰/선택 동기화 | 동일 파이프라인 락 사용(`service._try_acquire_pipeline_locks`). 백업 pull → 처리 순서로 정본 일치 |
 | 웹 대시보드 동기화 | `begin_sync_pipeline_async` — 락 선점 후 수락/거부를 즉시 반환 (`POST /api/sync` → 202/409) |
+| 웹/OPDS 서버 | `ThreadingHTTPServer` 기반 — 동시 요청 블로킹 없음 |
+| daily_digest 합본 | 합본 전용 카운터(`digest_success`/`digest_partial`)로 판정; per_site 카운터와 분리 |
 | 기기 0대 | 파이프라인 시작 시 `no_targets` 로 실패 (무의미한 스크래핑 방지) |
 | 레거시 이력 `*` | 동기화 시작 시 기본 기기로 `remap_legacy_star_to_device` |
 | config 충돌 | GUI `_safe_save_config` 는 revision CAS + 병합 재시도(최대 3회) |
+| AI 요약·번역 실패 | 주입된 `service.logger` 로 warning 노출(조용한 스킵 지양) |
 
 ### 보안·프라이버시
 
-- **OPDS**: 기본 localhost 무인증. LAN 공개 시 API 키 필수 (Bearer / `X-Api-Key`). 쿼리 `?api_key=` 는 기본 비활성 (`X3_OPDS_ALLOW_QUERY_API_KEY=1` 로만 허용).
+- **OPDS**: 기본 localhost 무인증. LAN 공개 시 API 키 필수 (Bearer / `X-Api-Key`). 쿼리 `?api_key=` 는 기본 비활성 (`X3_OPDS_ALLOW_QUERY_API_KEY=1` 로만 허용). OPDS/웹 서버는 `ThreadingHTTPServer` 기반으로 동시 요청을 처리한다.
 - **웹 대시보드 LAN**: HTTP 평문 — 신뢰 네트워크에서만. 동기화 트리거 API는 인증 필수.
-- **AI 요약·번역**: 기사 본문이 외부 API로 전송될 수 있음. 키는 `config.json` 로컬 저장(gitignore). 표시 마스킹: `websync.config.secrets`.
+- **AI 요약·번역**: 기사 본문이 외부 API로 전송될 수 있음. 키는 `config.json` 로컬 저장(gitignore). 표시 마스킹: `websync.config.secrets.mask_secret` — 설정 탭에서는 기본 `****` 표시, “표시” 토글로만 전체 노출. 호출 실패는 주입된 `service.logger` 로 warning 출력된다.
 
 ---
 
@@ -133,7 +137,7 @@ python -m pytest tests/ -q --tb=short -ra
 ```
 
 주요 영역: config, db, pipeline, scrapers(픽스처), epub, uploader, servers, process_lock, backup, scheduler 등.  
-대략 **150+** 케이스 (감사 수정·회귀 테스트 포함). 정확한 수는 `pytest --collect-only -q` 로 확인.
+**196 케이스 통과** (2026-07-27 기준; 감사 N1~N9 수정·회귀 테스트 포함). 정확한 수는 `pytest --collect-only -q` 로 확인.
 
 ### 허메틱(격리) 규칙 — CI 재발 방지
 

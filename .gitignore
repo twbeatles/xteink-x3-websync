@@ -3,7 +3,12 @@
 # Local Config / secrets / backups
 config.json
 config.json.bak
+config.json.tmp
+config.json.corrupt
 *.json.bak
+*.json.tmp
+*.json.corrupt
+*.bak
 .env
 .env.*
 *.local
@@ -48,6 +53,10 @@ env/
 build/
 dist/
 *.spec.bak
+*.manifest
+*.exe
+*.dll
+onefile-*
 # keep x3_websync.spec tracked
 
 # IDE / editor
@@ -83,3 +92,12 @@ specs/
 # Debug one-off scripts (local only; do not commit)
 scripts/_debug_*.py
 scripts/_tmp_*.py
+
+# Lock / PID / runtime sidecars (machine-local)
+*.lock
+*.pid
+*.lockfile
+
+# Scraper validation dumps (local artifacts)
+output/scraper_validation.json
+*.scraper_validation.json

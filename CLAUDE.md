@@ -141,13 +141,13 @@ main()
 | 역할 | `config.json` 로드·저장, 결손 키 자동 보강 |
 | 동시성 보호 | `threading.Lock()` 클래스 수준 락 |
 | 내부 메서드 | `_save_config_unlocked()` — 원자적 쓰기(tmp+bak+replace), `ConfigLoadError` |
-| 스키마 버전 | `config_version` (현재 2), 결손 키 자동 보강 |
+| 스키마 버전 | `config_version` (현재 3), 결손 키 자동 보강 |
 | RMW 안전 | `_config_revision` CAS + `update_config(mutator)` / `ConfigConflictError` |
 
 **설정 스키마** (`config.json`):
 ```json
 {
-  "config_version": 2,
+  "config_version": 3,
   "_config_revision": 0,
   "x3_ip": "crosspoint.local",
   "x3_devices": [{"name": "침실", "ip": "192.168.1.20"}],
