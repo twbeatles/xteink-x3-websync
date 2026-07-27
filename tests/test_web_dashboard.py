@@ -158,3 +158,60 @@ def test_login_sets_session_cookie():
             assert "x3sync_session=" in cookies
     finally:
         srv.stop()
+
+
+# --- N6: ThreadingHTTPServer 동시 요청 처리 ---
+
+def test_dashboard_serves_concurrent_status_requests():
+    """느린 sync_callback 실행 중에도 /api/status 요청이 블로킹되지 않는지."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_sync_cb():
+        started.set()
+        release.wait(timeout=5)
+        return True
+
+    srv = _start_dashboard(
+        api_token="tok123",
+        pipeline_busy_callback=lambda: False,
+        sync_callback=slow_sync_cb,
+        get_status_callback=lambda: {"status": "no_new", "success": True},
+    )
+    try:
+        sync_url = f"http://127.0.0.1:{srv.port}/api/sync"
+        status_url = f"http://127.0.0.1:{srv.port}/api/status"
+        results = {}
+
+        def trigger_sync():
+            req = urllib.request.Request(
+                sync_url, method="POST", headers={"Authorization": "Bearer tok123"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                results["sync_status"] = resp.status
+
+        def fetch_status():
+            # sync_cb 가 블로킹 중일 때 status 가 바로 응답하는지
+            with urllib.request.urlopen(
+                urllib.request.Request(status_url, headers={"Authorization": "Bearer tok123"}),
+                timeout=5,
+            ) as resp:
+                results["status"] = json.loads(resp.read())["last_result"]["status"]
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            sync_fut = ex.submit(trigger_sync)
+            assert started.wait(timeout=3)  # sync_cb 진입 확인
+            # sync 가 release 대기 중일 때 status 요청 — 즉시 응답해야
+            status_fut = ex.submit(fetch_status)
+            status_fut.result(timeout=5)
+            release.set()
+            sync_fut.result(timeout=10)
+
+        assert results["status"] == "no_new"
+        assert results["sync_status"] == 202
+    finally:
+        srv.stop()

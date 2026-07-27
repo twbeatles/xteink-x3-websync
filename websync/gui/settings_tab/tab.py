@@ -98,6 +98,11 @@ class SettingsTab(
         ttk.Label(opds_frame, text="기본은 localhost만 허용. LAN 공개 시 API 키 인증 필요.", font=("Malgun Gothic", 8), foreground=HINT_COLOR).grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
         self.opds_api_key_label = ttk.Label(opds_frame, text="", font=("Consolas", 8), foreground=HINT_COLOR)
         self.opds_api_key_label.grid(row=4, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        # N5: OPDS API 키 보기/숨기기 토글 + 새로발급
+        self.opds_key_show_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            opds_frame, text="API 키 표시", variable=self.opds_key_show_var, command=self._refresh_opds_key_display
+        ).grid(row=4, column=4, padx=10, pady=(0, 8), sticky="e")
         self.app._bind_autosave(self.opds_port_sp)
 
         # 2. 웹 대시보드
@@ -125,6 +130,11 @@ class SettingsTab(
         ).grid(row=3, column=0, columnspan=5, padx=10, pady=(0, 4), sticky="w")
         self.web_token_label = ttk.Label(web_frame, text="", font=("Consolas", 8), foreground=HINT_COLOR)
         self.web_token_label.grid(row=4, column=0, columnspan=5, padx=10, pady=(0, 8), sticky="w")
+        # N5: 웹 토큰 보기/숨기기 토글
+        self.web_token_show_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            web_frame, text="토큰 표시", variable=self.web_token_show_var, command=self._refresh_web_token_display
+        ).grid(row=4, column=4, padx=10, pady=(0, 8), sticky="e")
         self.app._bind_autosave(self.web_port_sp)
 
         # 3. Calibre Watch
@@ -156,6 +166,11 @@ class SettingsTab(
         ttk.Label(ai_frame, text="API Key / Ollama Host:").grid(row=1, column=0, padx=10, pady=6, sticky="w")
         self.ai_key_entry = ttk.Entry(ai_frame, width=40, show="*")
         self.ai_key_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=6, sticky="w")
+        # N5: 시크릿 보기/숨기기 토글
+        self.ai_key_show_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            ai_frame, text="표시", variable=self.ai_key_show_var, command=self._toggle_ai_key_visibility
+        ).grid(row=1, column=2, padx=(0, 10), pady=6, sticky="e")
 
         ttk.Button(ai_frame, text="저장", command=self._save_ai_settings).grid(row=1, column=3, padx=10, pady=6)
 
@@ -173,6 +188,17 @@ class SettingsTab(
 
         ttk.Button(trans_frame, text="저장", command=self._save_trans_settings).grid(row=0, column=3, padx=10, pady=6)
         ttk.Label(trans_frame, text="※ googletrans: 사이트별 '번역'만 설정해도 동작. libretranslate: 전역 활성화 필요.", font=("Malgun Gothic", 8), foreground=HINT_COLOR).grid(row=1, column=0, columnspan=4, padx=10, pady=(0, 6), sticky="w")
+
+        # N5: LibreTranslate API Key (마스킹) — provider=libretranslate 일 때만 활성
+        ttk.Label(trans_frame, text="LibreTranslate API Key:").grid(row=2, column=0, padx=10, pady=6, sticky="w")
+        self.trans_key_entry = ttk.Entry(trans_frame, width=40, show="*")
+        self.trans_key_entry.grid(row=2, column=1, columnspan=2, padx=5, pady=6, sticky="w")
+        self.trans_key_show_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            trans_frame, text="표시", variable=self.trans_key_show_var, command=self._toggle_trans_key_visibility
+        ).grid(row=2, column=2, padx=(0, 10), pady=6, sticky="e")
+        self.trans_provider_cb.bind("<<ComboboxSelected>>", lambda _e: self._update_trans_key_state())
+        self._update_trans_key_state()
 
         # 6. 클라우드 백업 동기화 (OneDrive 등)
         self._build_backup_sync_section(body)

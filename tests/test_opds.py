@@ -103,3 +103,40 @@ def test_opds_unicode_filename_download():
                 assert resp.read() == b"epub-data"
         finally:
             srv.stop()
+
+
+# --- N6: ThreadingHTTPServer 동시 요청 처리 ---
+
+def test_opds_serves_concurrent_requests():
+    """대용량 다운로드(느린 요청) 중 카탈로그(빠른 요청)가 동시 처리되는지."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # 1MB 더미 EPUB — 다운로드가 약간의 시간을 갖도록
+        with open(os.path.join(tmp, "big_2026-01-01.epub"), "wb") as f:
+            f.write(b"X" * (1024 * 1024))
+        srv = _start_server(tmp, require_auth=False)
+        try:
+            catalog_url = f"http://127.0.0.1:{srv.port}/opds"
+            dl_url = f"http://127.0.0.1:{srv.port}/opds/download/big_2026-01-01.epub"
+            results = {}
+
+            def fetch_catalog():
+                with urllib.request.urlopen(catalog_url, timeout=5) as resp:
+                    results["catalog"] = resp.read().decode("utf-8")
+
+            def fetch_download():
+                with urllib.request.urlopen(dl_url, timeout=10) as resp:
+                    results["download_size"] = len(resp.read())
+
+            # 다운로드 먼저 시작, 그 사이 카탈로그 요청이 블로킹되지 않아야
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                futs = [ex.submit(fetch_download), ex.submit(fetch_catalog)]
+                for fut in futs:
+                    fut.result(timeout=15)
+
+            assert "big_2026-01-01.epub" in results["catalog"]
+            assert results["download_size"] == 1024 * 1024
+        finally:
+            srv.stop()

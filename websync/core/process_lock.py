@@ -107,7 +107,19 @@ class ProcessFileLock:
             self._held = False
 
     def is_held_by_other(self) -> bool:
-        """다른 프로세스가 락을 잡고 있는지 비파괴 검사 (try-lock)."""
+        """다른 프로세스가 락을 잡고 있는지 비파괴 검사 (try-lock).
+
+        자체 락 파일 경로로 새 프로브(`ProcessFileLock`)를 만들어
+        ``acquire(blocking=False)``를 시도한다.
+
+        - 프로브 획득 성공 → 다른 보유자가 없음 → release 후 ``False`` 반환
+        - 프로브 획득 실패 → 다른 프로세스가 보유 중 → ``True`` 반환
+
+        이 프로브는 실제 락을 점유하지 않는다(성공 시 즉시 release).
+        따라서 호출 자체가 기존 보유자에게 간섭하지 않으며, 매 요청마다
+        파일 시스템 try-lock을 수행하는 ``is_pipeline_running`` 보조 판정으로
+        안전하게 쓸 수 있다.
+        """
         if self._held:
             return False
         probe = ProcessFileLock(self.lock_path)

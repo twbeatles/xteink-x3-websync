@@ -69,16 +69,15 @@ class AppConfigSyncMixin:
         opds_conf = config.get("opds_server", {})
         self.tab_settings.opds_port_sp.set(str(opds_conf.get("port", 8765)))
         self.tab_settings.opds_allow_lan_var.set(opds_conf.get("allow_lan", False))
-        opds_key = opds_conf.get("api_key", "")
-        self.tab_settings.opds_api_key_label.config(
-            text=f"OPDS API 키: {opds_key[:8]}... (config.json, LAN 시 X-Api-Key 헤더)" if opds_key else ""
-        )
+        # N5: 마스킹 표시는 _refresh_opds_key_display 헬퍼로 통일 (기존 token[:8] 노출 제거)
+        self.tab_settings.opds_key_show_var.set(False)
+        self.tab_settings._refresh_opds_key_display()
 
         web_conf = config.get("web_dashboard", {})
         self.tab_settings.web_port_sp.set(str(web_conf.get("port", 8766)))
         self.tab_settings.web_allow_lan_var.set(web_conf.get("allow_lan", False))
-        token = web_conf.get("api_token", "")
-        self.tab_settings.web_token_label.config(text=f"API 토큰: {token[:8]}... (config.json)" if token else "")
+        self.tab_settings.web_token_show_var.set(False)
+        self.tab_settings._refresh_web_token_display()
 
         watch_conf = config.get("calibre_watch", {})
         self.tab_settings.watch_dir_entry.insert(0, watch_conf.get("watch_dir", ""))
@@ -91,6 +90,10 @@ class AppConfigSyncMixin:
         trans_conf = config.get("translation", {})
         self.tab_settings.trans_enabled_var.set(trans_conf.get("enabled", False))
         self.tab_settings.trans_provider_cb.set(trans_conf.get("provider", "googletrans"))
+        # N5: libretranslate API Key Entry 채우기
+        self.tab_settings.trans_key_entry.delete(0, tk.END)
+        self.tab_settings.trans_key_entry.insert(0, trans_conf.get("libretranslate_api_key", ""))
+        self.tab_settings._update_trans_key_state()
 
         # 클라우드 백업 동기화
         self.tab_settings._load_backup_sync_from_config(config)

@@ -37,16 +37,13 @@ def sync_selected_articles(
         log("⚠️ 전송할 선택 기사가 없습니다.")
         return False
 
-    if not service._pipeline_lock.acquire(blocking=False):
-        log("⚠️ 동기화가 이미 실행 중입니다.")
-        return False
-
-    if not service._process_lock.acquire(blocking=False):
-        service._pipeline_lock.release()
-        log("⚠️ 다른 프로세스에서 동기화가 실행 중입니다.")
+    # 락 헬퍼 통일 (N7) — preview와 동일하게 service 헬퍼 사용
+    if not service._try_acquire_pipeline_locks(log):
         return False
 
     try:
+        # 공유 데이터 폴더 pull — 본 파이프라인과 동일하게 정본 반영 (N3)
+        service.maybe_backup_pull(log_callback=log)
         service._reload_config()
         generate_cover = service.config.get("epub_cover", True)
         upload_targets = service.uploader._build_target_list()
@@ -64,8 +61,8 @@ def sync_selected_articles(
             service._last_pipeline_result = {"status": "no_targets", "success": False}
             return False
 
-        summarizer = Summarizer(service.config)
-        translator = Translator(service.config)
+        summarizer = Summarizer(service.config, logger=service.logger)
+        translator = Translator(service.config, logger=service.logger)
 
         # site_name → translate_to 매핑 구성 (config sites에서 조회)
         site_translate_map: dict[str, str] = {}
@@ -208,5 +205,4 @@ def sync_selected_articles(
             service.logger.warning(f"[backup] 선택 동기화 후 내보내기 실패: {e}")
         return overall_ok
     finally:
-        service._process_lock.release()
-        service._pipeline_lock.release()
+        service._release_pipeline_locks()

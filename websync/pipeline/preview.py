@@ -25,16 +25,14 @@ def preview_articles(
         else:
             print(msg)
 
-    # 파이프라인과 동일 락을 비차단 획득 — TOCTOU로 동기화와 겹치지 않도록
-    if not service._pipeline_lock.acquire(blocking=False):
-        log("⚠️ 이미 파이프라인이 구동 중이므로 프리뷰를 실행할 수 없습니다.")
-        return []
-    if not service._process_lock.acquire(blocking=False):
-        service._pipeline_lock.release()
-        log("⚠️ 다른 프로세스에서 동기화가 실행 중이므로 프리뷰를 실행할 수 없습니다.")
+    # 파이프라인과 동일 락을 비차단 획득 (N7 — service 헬퍼로 통일)
+    if not service._try_acquire_pipeline_locks(log):
+        log("⚠️ 이미 파이프라인이 구동 중이거나 다른 프로세스에서 동기화 중이므로 프리뷰를 실행할 수 없습니다.")
         return []
 
     try:
+        # 공유 데이터 폴더 pull — 본 파이프라인과 동일하게 정본 반영 후 최신 config 사용 (N4)
+        service.maybe_backup_pull(log_callback=log)
         # config 스냅샷 사용 — 실행 중 service.config 교체로 인한 stale 참조 방지
         config = service.config_manager.load_config()
         enabled_sites = [s for s in config.get("sites", []) if s.get("enabled", True)]
@@ -111,5 +109,4 @@ def preview_articles(
         log(f"\n📊 프리뷰 요약: 총 {len(preview_results)}개의 신규 기사를 검출했습니다.")
         return preview_results
     finally:
-        service._process_lock.release()
-        service._pipeline_lock.release()
+        service._release_pipeline_locks()

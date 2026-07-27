@@ -49,6 +49,7 @@ class SettingsServersMixin:
                 url = self.app._opds_server.get_url()
                 self.opds_url_label.config(text=url)
                 self.app._log_message(f"📡 OPDS 서버 시작: {url}")
+                self._refresh_opds_key_display()
             else:
                 messagebox.showerror("오류", f"OPDS 서버 시작 실패. 포트 {port}이 이미 사용 중일 수 있습니다.")
 
@@ -100,6 +101,7 @@ class SettingsServersMixin:
                 url = self.app._web_dashboard.get_url()
                 self.web_url_label.config(text=url)
                 self.app._log_message(f"🌐 웹 대시보드 시작: {url}")
+                self._refresh_web_token_display()
             else:
                 messagebox.showerror("오류", f"웹 대시보드 시작 실패. 포트 {port}이 이미 사용 중일 수 있습니다.")
 

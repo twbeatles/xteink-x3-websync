@@ -1,17 +1,25 @@
 """기사 번역 모듈 (googletrans 또는 LibreTranslate 지원)"""
+import logging
 import re
 
 
 class Translator:
     """기사 HTML을 지정 언어로 번역하는 클래스."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, logger: logging.Logger | None = None):
         cfg = config.get("translation", {})
         self.enabled = cfg.get("enabled", False)
         self.provider = cfg.get("provider", "googletrans")
         self.libretranslate_host = cfg.get("libretranslate_host", "http://localhost:5000")
         self.libretranslate_api_key = cfg.get("libretranslate_api_key", "")
         self._gtrans = None
+        self._logger = logger  # None 이면 print 폴백 (N8)
+
+    def _warn(self, msg: str) -> None:
+        if self._logger is not None:
+            self._logger.warning(msg)
+        else:
+            print(msg)
 
     def is_available(self) -> bool:
         return self.enabled
@@ -31,8 +39,9 @@ class Translator:
             try:
                 from googletrans import Translator as GT
                 self._gtrans = GT()
-            except Exception:
+            except Exception as e:
                 self._gtrans = None
+                self._warn(f"googletrans 로드 실패 (번역 비활성): {e}")
         return self._gtrans
 
     def translate_html(self, html_content: str, target_lang: str = "ko", source_lang: str = "auto") -> str:
@@ -54,7 +63,7 @@ class Translator:
                         translated_parts.append(part)
             return "".join(translated_parts)
         except Exception as e:
-            print(f"⚠️ 번역 실패: {e}")
+            self._warn(f"⚠️ 번역 실패: {e}")
             return html_content
 
     def _do_translate(self, text: str, target: str, source: str) -> str:

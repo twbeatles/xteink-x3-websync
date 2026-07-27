@@ -1,14 +1,14 @@
 """웹 대시보드 HTTPServer 래퍼."""
 from __future__ import annotations
 
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from typing import Callable, Optional
 
 from websync.servers.dashboard.handler import DashboardHandler
 
 
-class DashboardHTTPServer(HTTPServer):
-    """핸들러에 대시보드 설정·콜백을 주입하는 HTTP 서버"""
+class DashboardHTTPServer(ThreadingHTTPServer):
+    """핸들러에 대시보드 설정·콜백을 주입하는 HTTP 서버 (ThreadingHTTPServer — 동시 요청 처리, N6)"""
 
     def __init__(
         self,

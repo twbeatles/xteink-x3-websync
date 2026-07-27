@@ -1,6 +1,6 @@
 import json
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from websync.pipeline.summarizer import Summarizer
 
@@ -38,3 +38,41 @@ def test_call_openai_valid_response():
         result = s._call_openai("prompt")
         assert "요약문입니다" in result
         assert "ai-summary" in result
+
+
+# --- N8: logger 주입 테스트 ---
+
+def test_summarizer_uses_logger_when_provided():
+    """logger 주입 시 API 호출 실패를 logger.warning 으로 출력."""
+    logger = MagicMock()
+    s = Summarizer(_config(), logger=logger)
+
+    with patch("urllib.request.urlopen", side_effect=RuntimeError("network down")):
+        result = s.summarize("제목", "<p>본문</p>")
+
+    assert result == ""
+    logger.warning.assert_called()
+    warned = " ".join(str(c) for c in logger.warning.call_args_list)
+    assert "AI 요약 실패" in warned
+
+
+def test_summarizer_logger_falls_back_to_print_when_none():
+    """logger=None 일 때 기존처럼 print 폴백 (에러 없이 동작)."""
+    s = Summarizer(_config(), logger=None)
+    with patch("urllib.request.urlopen", side_effect=RuntimeError("boom")):
+        with patch("builtins.print") as mock_print:
+            result = s.summarize("제목", "<p>본문</p>")
+    assert result == ""
+    mock_print.assert_called()
+
+
+def test_summarizer_logger_warns_on_empty_choices():
+    """빈 choices 응답도 logger.warning 으로 노출되는지."""
+    logger = MagicMock()
+    s = Summarizer(_config(), logger=logger)
+    fake_resp = BytesIO(json.dumps({"id": "x"}).encode())
+
+    with patch("urllib.request.urlopen", return_value=fake_resp):
+        s._call_openai("prompt")
+
+    logger.warning.assert_called()

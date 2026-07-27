@@ -4,13 +4,13 @@ import re
 import secrets
 import threading
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 from urllib.parse import quote, unquote, urlparse, parse_qs
 
 
-class _OPDSHTTPServer(HTTPServer):
-    """핸들러에 OPDS 설정을 주입하는 HTTP 서버"""
+class _OPDSHTTPServer(ThreadingHTTPServer):
+    """핸들러에 OPDS 설정을 주입하는 HTTP 서버 (ThreadingHTTPServer — 동시 요청 처리, N6)."""
 
     def __init__(
         self,

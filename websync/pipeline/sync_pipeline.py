@@ -39,8 +39,8 @@ def run_sync_pipeline_locked(
     log("✨ 동기화 프로세스를 실행합니다...")
     service._reload_config()
 
-    summarizer = Summarizer(service.config)
-    translator = Translator(service.config)
+    summarizer = Summarizer(service.config, logger=service.logger)
+    translator = Translator(service.config, logger=service.logger)
 
     enabled_sites = [s for s in service.config.get("sites", []) if s.get("enabled", True)]
     if not enabled_sites:
@@ -86,6 +86,10 @@ def run_sync_pipeline_locked(
 
     epub_merge_mode = service.config.get("epub_merge_mode", "per_site")
     digest_articles = {}  # {site_name: [new_articles]}
+    # 합본(daily_digest) 모드 전용 결과 플래그 — per_site 카운터와 분리 (N1)
+    digest_success = False
+    digest_partial = False
+    digest_attempted = False
 
     for site_idx, site in enumerate(enabled_sites):
         name = site.get("name", "무명 사이트")
@@ -225,6 +229,7 @@ def run_sync_pipeline_locked(
     # 일간 합본 처리 진행 (epub_merge_mode == "daily_digest" 일 경우)
     if epub_merge_mode == "daily_digest" and digest_articles:
         log("\n=== 📚 일간 합본(Daily Digest) 빌드 및 전송 시작 ===")
+        digest_attempted = True
         try:
             # 모든 축적된 기사의 URL 목록
             all_new_urls = []
@@ -270,17 +275,17 @@ def run_sync_pipeline_locked(
                         service.db.mark_synced_many(batch)
                     if all_ok:
                         log("🎉 일간 합본 동기화 완료 및 전송 성공!")
-                        success_count = actual_work_sites
+                        digest_success = True
                     else:
                         failed = [ip_to_name.get(ip, ip) for ip, ok in upload_results.items() if not ok]
                         log(f"⚠️ 일간 합본 일부 기기 전송 실패: {', '.join(failed)}")
-                        partial_count = 1
+                        digest_partial = True
                 else:
                     log("❌ 일간 합본 전송 실패! 기기 상태를 확인하세요.")
             else:
                 # target_ips 는 위에서 비어 있지 않음 → pending 없음 = 이미 전 기기 전송 완료
                 log("💡 합본 대상 기사가 이미 모든 기기에 전송되어 합본 생성을 건너뜁니다.")
-                success_count = actual_work_sites
+                digest_success = True
 
         except Exception as e:
             service.logger.exception(f"일간 합본 처리 중 오류: {e}")
@@ -289,6 +294,37 @@ def run_sync_pipeline_locked(
 
     if progress_callback:
         progress_callback(total_sites, total_sites)
+
+    # 합본 모드는 단일 업로드 결과로 성공 판정 (N1 — per_site 카운터와 분리)
+    if epub_merge_mode == "daily_digest" and digest_attempted:
+        overall_ok = digest_success and site_errors == 0
+        service._last_pipeline_result = {
+            "status": "completed",
+            "success": overall_ok,
+            "merge_mode": "daily_digest",
+            "digest_success": digest_success,
+            "digest_partial": digest_partial,
+            "site_count": len(digest_articles),
+            "site_errors": site_errors,
+        }
+        if overall_ok:
+            ToastNotifier.show_toast(
+                "X3 WebSync 동기화 완료",
+                f"{len(digest_articles)}개 사이트 소식이 일간 합본으로 무선 전송되었습니다."
+            )
+        elif digest_partial:
+            ToastNotifier.show_toast(
+                "X3 WebSync 부분 완료",
+                "일간 합본이 일부 기기에만 전송되었습니다. 로그를 확인하세요.",
+                is_error=True,
+            )
+        else:
+            ToastNotifier.show_toast(
+                "X3 WebSync 동기화 실패",
+                "일간 합본 전송 과정에 오류가 발생했습니다. (기기 연결 상태 확인 요망)",
+                is_error=True,
+            )
+        return overall_ok
 
     if actual_work_sites == 0:
         if site_errors > 0:
@@ -331,6 +367,7 @@ def run_sync_pipeline_locked(
     service._last_pipeline_result = {
         "status": "completed",
         "success": overall_ok,
+        "merge_mode": "per_site",
         "success_count": success_count,
         "partial_count": partial_count,
         "actual_work_sites": actual_work_sites,

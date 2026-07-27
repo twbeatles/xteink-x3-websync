@@ -1,18 +1,26 @@
 """AI 기사 요약 모듈 (OpenAI API 또는 Ollama 로컬 LLM 지원)"""
 import html
+import logging
 import re
 
 
 class Summarizer:
     """기사 텍스트를 AI로 요약하는 클래스. API 키가 없으면 자동 스킵."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, logger: logging.Logger | None = None):
         ai_cfg = config.get("ai_summary", {})
         self.enabled = ai_cfg.get("enabled", False)
         self.provider = ai_cfg.get("provider", "openai")
         self.api_key = ai_cfg.get("api_key", "")
         self.ollama_host = ai_cfg.get("ollama_host", "http://localhost:11434")
         self.model = ai_cfg.get("model", "gpt-4o-mini")
+        self._logger = logger  # None 이면 print 폴백 (N8)
+
+    def _warn(self, msg: str) -> None:
+        if self._logger is not None:
+            self._logger.warning(msg)
+        else:
+            print(msg)
 
     def is_available(self) -> bool:
         if not self.enabled:
@@ -42,7 +50,7 @@ class Summarizer:
             elif self.provider == "ollama":
                 return self._call_ollama(prompt)
         except Exception as e:
-            print(f"⚠️ AI 요약 실패: {e}")
+            self._warn(f"⚠️ AI 요약 실패: {e}")
         return ""
 
     def _call_openai(self, prompt: str) -> str:
@@ -63,12 +71,12 @@ class Summarizer:
             result = json.loads(resp.read())
         choices = result.get("choices") or []
         if not choices:
-            print("⚠️ AI 요약: OpenAI 응답에 choices가 없습니다.")
+            self._warn("⚠️ AI 요약: OpenAI 응답에 choices가 없습니다.")
             return ""
         message = choices[0].get("message") or {}
         summary = (message.get("content") or "").strip()
         if not summary:
-            print("⚠️ AI 요약: OpenAI 응답 본문이 비어 있습니다.")
+            self._warn("⚠️ AI 요약: OpenAI 응답 본문이 비어 있습니다.")
             return ""
         return self._format_summary(summary)
 
