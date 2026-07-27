@@ -62,13 +62,23 @@ dist/
 Thumbs.db
 desktop.ini
 
-# Local agent / MCP / indexing (machine-local)
+# Local agent / MCP / indexing / Spec Kit (machine-local, do not commit)
 terminals/
 mcps/
+mcp/
+.mcp/
 .codegraph/
 .zcode/
 .grok/
 .cursor/
+.agents/
+.claude/
+.codex/
+.specify/
+specs/
+.gemini/
+.windsurf/
+.continue/
 
 # Debug one-off scripts (local only; do not commit)
 scripts/_debug_*.py
