@@ -50,6 +50,11 @@ def make_cover_image(site_name: str, article_count: int, today_str: str) -> byte
         img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()
     except ImportError:
+        try:
+            from websync.core.logger import get_logger
+            get_logger().info("Pillow 미설치로 표지 생성을 건너뜁니다. (EXE 경량 빌드 환경 등)")
+        except Exception:
+            pass
         return None
     except Exception:
         return None

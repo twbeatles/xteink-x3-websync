@@ -123,15 +123,19 @@ class NewneekScraper(BaseScraper):
             title = ""
             html = ""
             if nd and nd.string:
-                data = json.loads(nd.string)
-                layout = (
-                    (data.get("props") or {})
-                    .get("pageProps", {})
-                    .get("layoutData")
-                    or {}
-                )
-                title = (layout.get("articleTitle") or "").strip()
-                html = layout.get("articleContent") or ""
+                try:
+                    data = json.loads(nd.string)
+                    if isinstance(data, dict):
+                        props = data.get("props")
+                        if isinstance(props, dict):
+                            page_props = props.get("pageProps")
+                            if isinstance(page_props, dict):
+                                layout = page_props.get("layoutData")
+                                if isinstance(layout, dict):
+                                    title = (layout.get("articleTitle") or "").strip()
+                                    html = layout.get("articleContent") or ""
+                except Exception as e:
+                    self.logger.warning(f"뉴닉 __NEXT_DATA__ JSON 파싱 실패 (폴백 시도): {e}")
             if not html:
                 # 폴백: 본문 후보
                 body = (

@@ -154,6 +154,20 @@ class SyncService:
             self._backup_push_timer = timer
             timer.start()
 
+    def flush_backup_push(self) -> None:
+        """대기 중인 백업 push 타이머가 있다면 캔슬하고 즉시 동기 실행 (종료/클린업용)."""
+        with self._backup_timer_lock:
+            if self._backup_push_timer is not None:
+                try:
+                    self._backup_push_timer.cancel()
+                except Exception:
+                    pass
+                self._backup_push_timer = None
+                try:
+                    self.maybe_backup_push(force=True)
+                except Exception as e:
+                    self.logger.warning(f"[portable] flush 백업 내보내기 실패: {e}")
+
     def run_backup_sync_now(
         self,
         log_callback: Optional[Callable[[str], None]] = None,

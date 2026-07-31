@@ -1,4 +1,7 @@
-"""X3 WebSync 경량 웹 대시보드 서버 (하위 호환 진입점)."""
+"""X3 WebSync 경량 웹 대시보드 서버 (하위 호환 Deprecated 래퍼).
+
+권장 Canonical Import 경로: `from websync.servers.dashboard import WebDashboard`
+"""
 from websync.servers.dashboard import WebDashboard, DashboardHandler, DashboardHTTPServer
 from websync.servers.dashboard.session import (
     SESSION_COOKIE_NAME as _session_cookie_name,

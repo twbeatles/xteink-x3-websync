@@ -377,7 +377,7 @@ run_sync_pipeline()
 
 ## 5. 기능 확장 아이디어 (Feature Roadmap)
 
-> **참고 (2026-07-13)**: 아래 HIGH/MEDIUM 항목 중 상당수(로그, 진행률, 이력 탭, 전용 스크래퍼, AI 요약, 표지, 번역, OPDS, 다중 기기, Watch, 웹 대시보드, frozen 경로·프로세스 락 등)는 **이미 구현**되었습니다. 신규 작업 전 루트 `PROJECT_AUDIT.md`와 `docs/DEVELOPER.md`·코드 현황을 확인하세요. 아래 목록은 초기 로드맵 기록으로 유지합니다.
+> **참고 (2026-07-31)**: 아래 HIGH/MEDIUM/LOW 항목의 대부분(로그 저장, 진행률, 이력 탭, 전용 스크래퍼, AI 요약, 표지, 번역, OPDS, 다중 기기, Watch, 웹 대시보드, frozen 경로·프로세스 락 등) 및 2026-07-31 감사 개선 사항(한글/비아스키 파일명 Short Hash 고유성, OPDS Windows 드라이브 대소문자 `normcase` 방어, 백업 `flush_backup_push` 종료 훅, 웹 대시보드 `mtime` 로그 정렬 등)이 **완료**되었습니다. 신규 작업 전 루트 `PROJECT_AUDIT.md`와 `docs/DEVELOPER.md`·코드 현황을 확인하세요. 아래 목록은 초기 로드맵 기록으로 유지합니다.
 
 현재 아키텍처는 SOLID 원칙 기반으로 설계되어 있어 아래 기능들을 비교적 깔끔하게 추가할 수 있습니다.
 

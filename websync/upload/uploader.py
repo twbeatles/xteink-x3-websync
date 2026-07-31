@@ -1,6 +1,7 @@
 """X3 기기 HTTP 업로드."""
 from __future__ import annotations
 
+import hashlib
 import mimetypes
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,14 +36,18 @@ class X3Uploader:
         self.last_errors: dict[str, str] = {}
 
     def _sanitize_filename(self, file_path: str) -> str:
-        """CrossPoint 오작동(공백/특수문자/한글 파일명 크래시) 우회용 파일명 클렌징"""
+        """CrossPoint 오작동(공백/특수문자 크래시) 우회 및 고유 식별용 파일명 클렌징"""
         base, ext = os.path.splitext(os.path.basename(file_path))
+        # hashlib.md5 기반 6자리 short hash 생성하여 파일명 중복 덮어쓰기 방지
+        h = hashlib.md5(base.encode("utf-8", errors="replace")).hexdigest()[:6]
         safe_base = "".join([c if c.isalnum() or c in ("-", "_") else "_" for c in base])
         while "__" in safe_base:
             safe_base = safe_base.replace("__", "_")
         safe_base = safe_base.strip("_")
         if not safe_base:
-            safe_base = "sync_book"
+            safe_base = f"sync_book_{h}"
+        else:
+            safe_base = f"{safe_base}_{h}"
         return safe_base + ext.lower()
 
     def _guess_mime(self, file_path: str) -> str:

@@ -59,6 +59,11 @@ class AppSyncControlMixin:
     # ------------------------------------------------------------------
 
     def _on_close(self):
+        try:
+            if hasattr(self, "service") and self.service:
+                self.service.flush_backup_push()
+        except Exception:
+            pass
         if self._opds_server:
             self._opds_server.stop()
         if self._web_dashboard:

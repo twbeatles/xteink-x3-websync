@@ -21,16 +21,17 @@ HEADERS = {
 def _build_session() -> requests.Session:
     """연결 풀링 + 자동 재시도가 설정된 requests.Session 생성."""
     session = requests.Session()
+    kwargs = {"pool_connections": 20, "pool_maxsize": 20}
     if Retry is not None:
-        retry = Retry(
+        kwargs["max_retries"] = Retry(
             total=3,
             backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=("GET", "HEAD"),
         )
-        adapter = HTTPAdapter(max_retries=retry)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
+    adapter = HTTPAdapter(**kwargs)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
     return session
 
 

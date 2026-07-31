@@ -87,10 +87,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 from websync.core.paths import PROJECT_ROOT
                 log_dir = os.path.join(PROJECT_ROOT, "logs")
                 if os.path.isdir(log_dir):
-                    files = sorted(os.listdir(log_dir), reverse=True)
-                    if files:
+                    matching_files = [
+                        f for f in os.listdir(log_dir)
+                        if f.startswith("sync_") and f.endswith(".log")
+                    ]
+                    if not matching_files:
+                        matching_files = os.listdir(log_dir)
+                    if matching_files:
+                        matching_files.sort(
+                            key=lambda fname: os.path.getmtime(os.path.join(log_dir, fname)),
+                            reverse=True,
+                        )
                         try:
-                            with open(os.path.join(log_dir, files[0]), "r", encoding="utf-8") as f:
+                            with open(os.path.join(log_dir, matching_files[0]), "r", encoding="utf-8") as f:
                                 lines = f.readlines()
                                 log_text = "".join(lines[-100:])
                         except Exception:

@@ -122,11 +122,12 @@ class OPDSHandler(BaseHTTPRequestHandler):
             self.send_error(403)
             return
         fpath = os.path.join(self._ctx.output_dir, fname)
-        # output_dir 밖 탈출 방지
+        # output_dir 밖 탈출 방지 (Windows 드라이브 대소문자 차이 방어를 위해 normcase 적용)
         try:
-            real_out = os.path.realpath(self._ctx.output_dir)
-            real_file = os.path.realpath(fpath)
-            if not real_file.startswith(real_out + os.sep) and real_file != real_out:
+            real_out = os.path.normcase(os.path.realpath(self._ctx.output_dir))
+            real_file = os.path.normcase(os.path.realpath(fpath))
+            sep = os.path.normcase(os.sep)
+            if not real_file.startswith(real_out + sep) and real_file != real_out:
                 self.send_error(403)
                 return
         except OSError:
@@ -179,6 +180,8 @@ class OPDSServer:
         if self.require_auth and not self.api_key:
             print("❌ OPDS: LAN 공개 모드에는 api_key가 필요합니다.")
             return False
+        if self.bind_host not in ("127.0.0.1", "localhost"):
+            print(f"⚠️ [OPDS] LAN 공개 모드 활성화 ({self.bind_host}:{self.port}) — 평문 HTTP 통신이므로 보안 토큰 사용을 권장합니다.")
         try:
             self._server = _OPDSHTTPServer(
                 (self.bind_host, self.port),
