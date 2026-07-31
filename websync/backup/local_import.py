@@ -93,7 +93,8 @@ def import_local_sidecars(
 
     # --- sites: sites.json / *설정백업*.json ---
     config = config_manager.load_config()
-    local_sites = config.get("sites") if isinstance(config.get("sites"), list) else []
+    raw_sites = config.get("sites")
+    local_sites: list[dict] = raw_sites if isinstance(raw_sites, list) else []
     before_urls = {
         (s.get("url") or "").strip().lower()
         for s in local_sites

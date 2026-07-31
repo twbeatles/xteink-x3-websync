@@ -78,7 +78,7 @@ class NaverBlogScraper(BaseScraper):
             post_meta.append({"title": title, "post_link": post_link, "log_no": log_no})
 
         # 상세 페이지 병렬 수집 (N2) — 순서 유지
-        articles: list[dict] = [None] * len(post_meta)
+        articles: list[dict | None] = [None] * len(post_meta)
         if post_meta:
             workers = min(_DETAIL_MAX_WORKERS, len(post_meta))
             with ThreadPoolExecutor(max_workers=workers) as executor:

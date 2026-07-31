@@ -105,9 +105,9 @@ def test_rss_hani_fixture_encoding_and_image_only_fallback():
 def test_presets_include_korean_sources():
     from websync.scrapers.presets import KOREAN_SITE_PRESETS, get_preset_by_label
 
-    labels = [p["label"] for p in KOREAN_SITE_PRESETS]
+    labels = [p.get("label") or "" for p in KOREAN_SITE_PRESETS]
     assert any("Velog" in x for x in labels)
     assert any("뉴닉" in x for x in labels)
     p = get_preset_by_label("뉴닉 (공식)")
     assert p is not None
-    assert p["type"] == "newneek"
+    assert p.get("type") == "newneek"

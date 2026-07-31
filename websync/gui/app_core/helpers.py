@@ -37,25 +37,31 @@ class AppHelpersMixin:
         state = "disabled" if busy else "normal"
         
         # 각 탭의 활성 버튼 상태 제어
-        self.bottom_bar.sync_now_btn.config(state=state)
-        self.bottom_bar.preview_btn.config(state=state)
-        self.tab_sync.direct_upload_btn.config(state=state)
-        self.tab_sync.test_conn_btn.config(state=state)
-        self.tab_calibre.calibre_send_btn.config(state=state)
-        self.tab_calibre.calibre_conn_btn.config(state=state)
+        self.bottom_bar.sync_now_btn.configure(state=state)
+        self.bottom_bar.preview_btn.configure(state=state)
+        self.tab_sync.direct_upload_btn.configure(state=state)
+        self.tab_sync.test_conn_btn.configure(state=state)
+        self.tab_calibre.calibre_send_btn.configure(state=state)
+        self.tab_calibre.calibre_conn_btn.configure(state=state)
 
     def _log_message(self, message: str):
-        self.bottom_bar.log_txt.config(state="normal")
+        self.bottom_bar.log_txt.configure(state="normal")
         self.bottom_bar.log_txt.insert(tk.END, message + "\n")
         self.bottom_bar.log_txt.see(tk.END)
-        self.bottom_bar.log_txt.config(state="disabled")
+        self.bottom_bar.log_txt.configure(state="disabled")
 
     def _update_progress(self, current: int, total: int):
         if total > 0:
-            self.bottom_bar.progress_bar["maximum"] = total
-            self.bottom_bar.progress_bar["value"] = current
+            if hasattr(self.bottom_bar.progress_bar, "set"):
+                self.bottom_bar.progress_bar.set(min(1.0, max(0.0, current / total)))
+            else:
+                self.bottom_bar.progress_bar["maximum"] = total
+                self.bottom_bar.progress_bar["value"] = current
         else:
-            self.bottom_bar.progress_bar["value"] = 0
+            if hasattr(self.bottom_bar.progress_bar, "set"):
+                self.bottom_bar.progress_bar.set(0)
+            else:
+                self.bottom_bar.progress_bar["value"] = 0
 
     def _open_url(self, url: str):
         if url:
@@ -154,10 +160,6 @@ class AppHelpersMixin:
             if config is not self.service.config:
                 config["_config_revision"] = self.service.config.get("_config_revision")
             return True
-        except ConfigSaveError as e:
-            messagebox.showerror("설정 저장 실패", str(e), parent=parent)
-            self._log_message(f"❌ 설정 저장 실패: {e}")
-            return False
         except ConfigConflictError as e:
             messagebox.showerror(
                 "설정 저장 실패",
@@ -166,6 +168,10 @@ class AppHelpersMixin:
                 parent=parent,
             )
             self._log_message(f"❌ 설정 충돌 재시도 한도 초과: {e}")
+            return False
+        except ConfigSaveError as e:
+            messagebox.showerror("설정 저장 실패", str(e), parent=parent)
+            self._log_message(f"❌ 설정 저장 실패: {e}")
             return False
         except Exception as e:
             messagebox.showerror("설정 저장 실패", str(e), parent=parent)

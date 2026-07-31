@@ -27,16 +27,25 @@ from websync.gui.tab_settings import SettingsTab
 from websync.gui.bottom_bar import BottomBar
 
 
+def _set_entry_val(widget, val):
+    if hasattr(widget, "delete"):
+        widget.delete(0, "end")
+    if hasattr(widget, "insert"):
+        widget.insert(0, str(val))
+    elif hasattr(widget, "set"):
+        widget.set(str(val))
+
+
 class AppConfigSyncMixin:
     def _load_config_to_ui(self):
         config = self.service.config
         
         # 1. SyncTab 설정 로드
-        self.tab_sync.ip_entry.insert(0, config.get("x3_ip", "crosspoint.local"))
-        self.tab_sync.dir_entry.insert(0, config.get("output_dir", "./output"))
+        _set_entry_val(self.tab_sync.ip_entry, config.get("x3_ip", "crosspoint.local"))
+        _set_entry_val(self.tab_sync.dir_entry, config.get("output_dir", "./output"))
         self.tab_sync.font_cb.set(config.get("font_family", "serif"))
-        self.tab_sync.font_size_sp.set(str(config.get("font_size", 16)))
-        self.tab_sync.line_height_sp.set(str(config.get("line_height", 1.7)))
+        _set_entry_val(self.tab_sync.font_size_sp, config.get("font_size", 16))
+        _set_entry_val(self.tab_sync.line_height_sp, config.get("line_height", 1.7))
         self.tab_sync.cover_var.set(config.get("epub_cover", True))
 
         sched_conf = config.get("schedule", {})
@@ -48,8 +57,8 @@ class AppConfigSyncMixin:
         self.tab_sync._refresh_schedule_status()
 
         # 2. CalibreTab 설정 로드
-        self.tab_calibre.calibre_entry.insert(0, config.get("calibre_path", "C:\\Program Files\\Calibre2\\calibredb.exe"))
-        self.tab_calibre.calibre_lib_entry.insert(0, config.get("calibre_library_path", ""))
+        _set_entry_val(self.tab_calibre.calibre_entry, config.get("calibre_path", "C:\\Program Files\\Calibre2\\calibredb.exe"))
+        _set_entry_val(self.tab_calibre.calibre_lib_entry, config.get("calibre_library_path", ""))
         threading.Thread(target=self.tab_calibre._test_and_load_calibre, kwargs={"silent": True}, daemon=True).start()
 
         # 3. HistoryTab 로드
@@ -63,29 +72,29 @@ class AppConfigSyncMixin:
         # M4 & M7 설정 로드
         self.tab_settings.merge_mode_var.set(config.get("epub_merge_mode", "per_site"))
         self.tab_settings.epub_theme_cb.set(config.get("epub_theme", "default"))
-        self.tab_settings.custom_css_entry.insert(0, config.get("epub_custom_css", ""))
+        _set_entry_val(self.tab_settings.custom_css_entry, config.get("epub_custom_css", ""))
         self.tab_settings._on_theme_changed()
 
         opds_conf = config.get("opds_server", {})
-        self.tab_settings.opds_port_sp.set(str(opds_conf.get("port", 8765)))
+        _set_entry_val(self.tab_settings.opds_port_sp, opds_conf.get("port", 8765))
         self.tab_settings.opds_allow_lan_var.set(opds_conf.get("allow_lan", False))
         # N5: 마스킹 표시는 _refresh_opds_key_display 헬퍼로 통일 (기존 token[:8] 노출 제거)
         self.tab_settings.opds_key_show_var.set(False)
         self.tab_settings._refresh_opds_key_display()
 
         web_conf = config.get("web_dashboard", {})
-        self.tab_settings.web_port_sp.set(str(web_conf.get("port", 8766)))
+        _set_entry_val(self.tab_settings.web_port_sp, web_conf.get("port", 8766))
         self.tab_settings.web_allow_lan_var.set(web_conf.get("allow_lan", False))
         self.tab_settings.web_token_show_var.set(False)
         self.tab_settings._refresh_web_token_display()
 
         watch_conf = config.get("calibre_watch", {})
-        self.tab_settings.watch_dir_entry.insert(0, watch_conf.get("watch_dir", ""))
+        _set_entry_val(self.tab_settings.watch_dir_entry, watch_conf.get("watch_dir", ""))
 
         ai_conf = config.get("ai_summary", {})
         self.tab_settings.ai_enabled_var.set(ai_conf.get("enabled", False))
         self.tab_settings.ai_provider_cb.set(ai_conf.get("provider", "openai"))
-        self.tab_settings.ai_key_entry.insert(0, ai_conf.get("api_key", ""))
+        _set_entry_val(self.tab_settings.ai_key_entry, ai_conf.get("api_key", ""))
 
         trans_conf = config.get("translation", {})
         self.tab_settings.trans_enabled_var.set(trans_conf.get("enabled", False))

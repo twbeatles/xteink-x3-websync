@@ -28,17 +28,17 @@ class SettingsEpubMixin:
     def _on_theme_changed(self, event=None):
         theme = self.epub_theme_cb.get()
         if theme == "custom":
-            self.custom_css_entry.config(state="normal")
-            self.custom_css_btn.config(state="normal")
+            self.custom_css_entry.configure(state="normal")
+            self.custom_css_btn.configure(state="normal")
         else:
-            self.custom_css_entry.config(state="disabled")
-            self.custom_css_btn.config(state="disabled")
+            self.custom_css_entry.configure(state="disabled")
+            self.custom_css_btn.configure(state="disabled")
         self._save_epub_settings()
 
     def _browse_custom_css(self):
         f = filedialog.askopenfilename(title="커스텀 CSS 파일 선택", filetypes=[("CSS files", "*.css"), ("All files", "*.*")])
         if f:
-            self.custom_css_entry.config(state="normal")
+            self.custom_css_entry.configure(state="normal")
             self.custom_css_entry.delete(0, tk.END)
             self.custom_css_entry.insert(0, f)
             self._save_epub_settings()

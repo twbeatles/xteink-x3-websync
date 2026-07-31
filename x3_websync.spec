@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+import customtkinter
+
 block_cipher = None
 
 # 빌드 용량 경량화를 위해 선택적 의존성 및 무거운 라이브러리를 제외합니다.
@@ -35,9 +38,10 @@ a = Analysis(
     datas=[
         ('websync/servers/templates/*.html', 'websync/servers/templates'),
         ('websync/epub/themes/*.css', 'websync/epub/themes'),
+        (os.path.dirname(customtkinter.__file__), 'customtkinter'),
     ],
     hiddenimports=[
-        'lxml', 'lxml.etree', 'ebooklib', 'bs4', 'requests',
+        'customtkinter', 'lxml', 'lxml.etree', 'ebooklib', 'bs4', 'requests',
         'websync', 'websync.core', 'websync.core.paths', 'websync.core.logger',
         'websync.core.process_lock', 'websync.core.article', 'websync.core.types',
         'websync.config', 'websync.config.exceptions', 'websync.config.validator',

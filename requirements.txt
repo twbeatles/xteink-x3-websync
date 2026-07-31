@@ -4,6 +4,8 @@ ebooklib>=0.18
 requests>=2.31.0
 lxml>=5.0.0
 pytest>=8.0.0
+customtkinter>=5.2.0
+
 
 # 선택 (기능별) — pip install -r requirements-optional.txt
 # Pillow>=10.0.0          # EPUB 표지 자동 생성

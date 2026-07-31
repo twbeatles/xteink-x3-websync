@@ -6,10 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 from websync.gui.widgets import (
-    HINT_COLOR,
-    YELLOW_COLOR,
-    GREEN_COLOR,
-    RED_COLOR,
+    COLOR_SUCCESS, COLOR_DANGER, COLOR_WARNING, COLOR_SECONDARY_FG,
     create_scrollable_frame,
     create_scrolled_tree,
 )
@@ -39,10 +36,14 @@ class DeviceFilesBrowserMixin:
         self._device_choices = [(f"{t['name']} ({t['ip']})", t["ip"]) for t in targets]
         labels = [label for label, _ in self._device_choices]
         prev_ip = self._selected_ip()
-        self.device_cb["values"] = labels
+        if hasattr(self.device_cb, "configure"):
+            self.device_cb.configure(values=labels)
+        else:
+            self.device_cb["values"] = labels
+
         if not labels:
             self.device_cb.set("")
-            self.status_label.config(text="등록된 기기 없음", foreground=RED_COLOR)
+            self.status_label.configure(text="등록된 기기 없음", text_color=COLOR_DANGER[0])
             return
         idx = 0
         if prev_ip:
@@ -50,7 +51,8 @@ class DeviceFilesBrowserMixin:
                 if ip == prev_ip:
                     idx = i
                     break
-        self.device_cb.current(idx)
+        if labels and idx < len(labels):
+            self.device_cb.set(labels[idx])
 
     def _selected_ip(self) -> str:
         sel = self.device_cb.get()
@@ -72,8 +74,8 @@ class DeviceFilesBrowserMixin:
         self._busy = busy
         state = "disabled" if busy else "normal"
         for btn in self._action_buttons:
-            btn.config(state=state)
-        self.device_cb.config(state="disabled" if busy else "readonly")
+            btn.configure(state=state)
+        self.device_cb.configure(state="disabled" if busy else "normal")
 
     # ------------------------------------------------------------------
     # 목록 로드
@@ -94,7 +96,7 @@ class DeviceFilesBrowserMixin:
         self._current_path = path
         self.path_var.set(path)
         self._set_busy(True)
-        self.status_label.config(text="불러오는 중…", foreground=YELLOW_COLOR)
+        self.status_label.configure(text="불러오는 중…", text_color=COLOR_WARNING[0])
         self.app._log_message(f"📁 [{ip}] 파일 목록 요청: {path}")
 
         def task():
@@ -133,10 +135,10 @@ class DeviceFilesBrowserMixin:
     ) -> None:
         self._set_busy(False)
         if err:
-            self.status_label.config(text="연결 실패", foreground=RED_COLOR)
+            self.status_label.configure(text="연결 실패", text_color=COLOR_DANGER[0])
             self._all_items = []
             self._fill_tree([])
-            self.summary_label.config(text="")
+            self.summary_label.configure(text="")
             self.app._log_message(f"❌ [{ip}] 파일 목록 실패: {err}")
             messagebox.showerror(
                 "파일 목록 실패",
@@ -151,10 +153,10 @@ class DeviceFilesBrowserMixin:
         self._all_items = items
         self._apply_filter_to_tree()
         if status_ok:
-            self.status_label.config(text=status_text, foreground=GREEN_COLOR)
+            self.status_label.configure(text=status_text, text_color=COLOR_SUCCESS[0])
         else:
-            self.status_label.config(
-                text=status_text or "연결됨(상태 미지원)", foreground=YELLOW_COLOR
+            self.status_label.configure(
+                text=status_text or "연결됨(상태 미지원)", text_color=COLOR_WARNING[0]
             )
         self.app._log_message(f"✅ [{ip}] {path} — {len(items)}개 항목")
 
@@ -173,7 +175,7 @@ class DeviceFilesBrowserMixin:
         file_count = sum(1 for i in filtered if not i.get("isDirectory"))
         dir_count = sum(1 for i in filtered if i.get("isDirectory"))
         total_size = sum(int(i.get("size") or 0) for i in filtered if not i.get("isDirectory"))
-        self.summary_label.config(
+        self.summary_label.configure(
             text=f"폴더 {dir_count} · 파일 {file_count} · {format_file_size(total_size)}"
         )
 

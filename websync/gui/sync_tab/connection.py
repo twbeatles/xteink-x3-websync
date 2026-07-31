@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from websync.gui.widgets import (
-    BG_COLOR, TEXT_BG, SECONDARY_BG, HINT_COLOR, YELLOW_COLOR, GREEN_COLOR, RED_COLOR,
+    COLOR_SUCCESS, COLOR_DANGER, COLOR_WARNING,
     create_scrollable_frame, create_scrolled_tree, setup_dialog, bind_widget_mousewheel
 )
 from websync.upload.uploader import X3Uploader, normalize_device_host
@@ -17,8 +17,8 @@ from websync.config.exceptions import ConfigSaveError, ConfigLoadError
 
 class SyncConnectionMixin:
     def _test_connection(self):
-        self.conn_status_label.config(text="연결 중...", foreground=YELLOW_COLOR)
-        self.test_conn_btn.config(state="disabled")
+        self.conn_status_label.configure(text="연결 중...", text_color=COLOR_WARNING[0])
+        self.test_conn_btn.configure(state="disabled")
 
         def task():
             uploader = self.app._make_uploader()
@@ -32,21 +32,21 @@ class SyncConnectionMixin:
 
     def _test_connection_finished(self, results: list[tuple[str, str, bool]]):
         if not self.app._sync_busy:
-            self.test_conn_btn.config(state="normal")
+            self.test_conn_btn.configure(state="normal")
         if not results:
-            self.conn_status_label.config(text="등록된 기기 없음", foreground=RED_COLOR)
+            self.conn_status_label.configure(text="등록된 기기 없음", text_color=COLOR_DANGER[0])
             return
         ok_count = sum(1 for _, _, ok in results if ok)
         if ok_count == len(results):
-            self.conn_status_label.config(text=f"전체 {len(results)}대 연결 성공 ✅", foreground=GREEN_COLOR)
+            self.conn_status_label.configure(text=f"전체 {len(results)}대 연결 성공 ✅", text_color=COLOR_SUCCESS[0])
         elif ok_count > 0:
             failed = [name for name, _, ok in results if not ok]
-            self.conn_status_label.config(
+            self.conn_status_label.configure(
                 text=f"부분 성공 ({ok_count}/{len(results)}) — 실패: {', '.join(failed)}",
-                foreground=YELLOW_COLOR,
+                text_color=COLOR_WARNING[0],
             )
         else:
-            self.conn_status_label.config(text="모든 기기 연결 실패 ❌", foreground=RED_COLOR)
+            self.conn_status_label.configure(text="모든 기기 연결 실패 ❌", text_color=COLOR_DANGER[0])
         for name, ip, ok in results:
             status = "✅" if ok else "❌"
             self.app._log_message(f"   {status} [{name}] {ip}")
@@ -87,7 +87,7 @@ class SyncConnectionMixin:
             return
         self.app._save_ui_settings()
         self.app._log_message(f"📡 로컬 파일 직접 전송 중: {os.path.basename(file_path)}")
-        self.direct_upload_btn.config(state="disabled")
+        self.direct_upload_btn.configure(state="disabled")
 
         def task():
             results = self.app._make_uploader().upload_to_targets(file_path)
@@ -97,7 +97,7 @@ class SyncConnectionMixin:
 
     def _direct_upload_finished(self, results: dict, file_path: str):
         if not self.app._sync_busy:
-            self.direct_upload_btn.config(state="normal")
+            self.direct_upload_btn.configure(state="normal")
         all_ok, any_ok, summary = self.app._summarize_upload_results(results)
         basename = os.path.basename(file_path)
         if all_ok:

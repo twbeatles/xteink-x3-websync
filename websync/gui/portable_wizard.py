@@ -1,14 +1,17 @@
-"""첫 실행 공유 데이터 폴더 연결 마법사."""
+"""첫 실행 공유 데이터 폴더 연결 마법사 (CustomTkinter 기반 모달)."""
 from __future__ import annotations
 
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
 from typing import TYPE_CHECKING, Callable, Optional
 
 from websync.backup.format import MANIFEST_FILENAME, SITES_FILENAME
 from websync.backup.portable_cfg import apply_portable_cfg, get_portable_cfg
-from websync.gui.widgets import BG_COLOR, HINT_COLOR, setup_dialog
+from websync.gui.widgets import (
+    CardFrame, COLOR_CARD_BG, COLOR_FG, COLOR_SECONDARY_FG, COLOR_ACCENT, get_font, setup_dialog
+)
 
 if TYPE_CHECKING:
     from websync.pipeline.service import SyncService
@@ -26,11 +29,11 @@ def should_show_portable_wizard(config: dict) -> bool:
 
 
 class PortableDataWizard:
-    """공유 데이터 폴더 연결/생성 또는 이 PC만 사용."""
+    """공유 데이터 폴더 연결/생성 또는 이 PC만 사용 모달 마법사."""
 
     def __init__(
         self,
-        parent: tk.Tk,
+        parent: ctk.CTk,
         service: "SyncService",
         *,
         on_done: Optional[Callable[[], None]] = None,
@@ -40,60 +43,69 @@ class PortableDataWizard:
         self.on_done = on_done
         self.result: str | None = None  # local | connect | create | None
 
-        self.dialog = tk.Toplevel(parent)
+        self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title("공유 데이터 폴더 설정")
-        self.dialog.configure(bg=BG_COLOR)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
-        setup_dialog(self.dialog, parent, 520, 360)
+        setup_dialog(self.dialog, parent, 580, 420)
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_local_only)
 
-        outer = ttk.Frame(self.dialog, padding=18)
-        outer.pack(fill="both", expand=True)
+        outer = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=18, pady=18)
 
-        ttk.Label(
+        ctk.CTkLabel(
             outer,
             text="PC를 바꿔도 사이트 목록과 전송 이력을 유지할까요?",
-            font=("Malgun Gothic", 12, "bold"),
+            font=get_font(15, "bold"),
+            text_color=COLOR_FG,
         ).pack(anchor="w", pady=(0, 8))
 
-        ttk.Label(
+        ctk.CTkLabel(
             outer,
             text="OneDrive·Google Drive 등 동기화되는 폴더를 지정하면\n"
                  "구독 사이트와 ‘이미 보낸 글’ 이력이 여러 PC에서 공유됩니다.\n"
                  "동기화 시 새 글만 전송할 수 있습니다.",
-            font=("Malgun Gothic", 9),
-            foreground=HINT_COLOR,
+            font=get_font(12),
+            text_color=COLOR_SECONDARY_FG,
             justify="left",
         ).pack(anchor="w", pady=(0, 14))
 
-        btn_frame = ttk.Frame(outer)
-        btn_frame.pack(fill="x", pady=6)
+        btn_card = CardFrame(outer)
+        btn_card.pack(fill="x", pady=6)
 
-        ttk.Button(
-            btn_frame,
+        ctk.CTkButton(
+            btn_card,
             text="기존 공유 폴더 연결…",
+            font=get_font(13, "bold"),
+            fg_color=COLOR_ACCENT[0],
+            hover_color=COLOR_ACCENT[1],
+            height=38,
             command=self._connect_existing,
-        ).pack(fill="x", pady=4)
+        ).pack(fill="x", padx=12, pady=(10, 4))
 
-        ttk.Button(
-            btn_frame,
+        ctk.CTkButton(
+            btn_card,
             text="새 공유 폴더 만들기…",
+            font=get_font(13),
+            height=38,
             command=self._create_new,
-        ).pack(fill="x", pady=4)
+        ).pack(fill="x", padx=12, pady=4)
 
-        ttk.Button(
-            btn_frame,
+        ctk.CTkButton(
+            btn_card,
             text="이 PC만 사용 (나중에 설정)",
+            font=get_font(13),
+            fg_color=("#e9ecef", "#343a40"),
+            text_color=COLOR_FG,
+            height=38,
             command=self._on_local_only,
-        ).pack(fill="x", pady=4)
+        ).pack(fill="x", padx=12, pady=(4, 10))
 
-        ttk.Label(
+        ctk.CTkLabel(
             outer,
             text="나중에 고급 설정 → 공유 데이터 폴더에서도 변경할 수 있습니다.",
-            font=("Malgun Gothic", 8),
-            foreground=HINT_COLOR,
-        ).pack(anchor="w", pady=(16, 0))
+            font=get_font(12),
+            text_color=COLOR_SECONDARY_FG,
+        ).pack(anchor="w", pady=(12, 0))
 
     def show(self) -> None:
         self.dialog.wait_window()
@@ -155,7 +167,6 @@ class PortableDataWizard:
         ):
             return
 
-        # pull
         try:
             result = self.service.maybe_backup_pull(force=True)
             msg = result.get("message") or "가져오기 완료"

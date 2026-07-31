@@ -1,21 +1,25 @@
-"""동기화 이력 탭 컴포넌트"""
+"""동기화 이력 탭 컴포넌트 (CustomTkinter 기반)"""
+from __future__ import annotations
+
 import hashlib
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
 
 from websync.gui.widgets import (
-    YELLOW_COLOR, create_scrollable_frame, create_scrolled_tree
+    CardFrame, COLOR_CARD_BG, COLOR_FG, COLOR_SECONDARY_FG, COLOR_ACCENT,
+    COLOR_DANGER, COLOR_WARNING, get_font, create_scrollable_frame, create_scrolled_tree
 )
 from websync.db.history import SyncHistoryDbError
 from websync.backup.atomic_io import read_json_safe, write_json_atomic
 from websync.backup.format import build_history_payload, extract_posts
 
 
-class HistoryTab(ttk.Frame):
-    """동기화 이력 조회를 담당하는 탭"""
+class HistoryTab(ctk.CTkFrame):
+    """동기화 이력 조회를 담당하는 탭 패널"""
 
     def __init__(self, parent, app):
-        super().__init__(parent)
+        super().__init__(parent, fg_color="transparent")
         self.app = app
         self.service = app.service
         self.db = app.service.db
@@ -26,33 +30,35 @@ class HistoryTab(ttk.Frame):
     def _build_ui(self):
         body = create_scrollable_frame(self)
 
-        ctrl_frame = ttk.Frame(body)
-        ctrl_frame.pack(fill="x", padx=15, pady=8)
+        ctrl_card = CardFrame(body)
+        ctrl_card.pack(fill="x", padx=8, pady=6)
 
-        btn_row = ttk.Frame(ctrl_frame)
-        btn_row.pack(fill="x")
-        ttk.Button(btn_row, text="🔄 이력 새로고침", command=self._refresh_history).pack(side="left", padx=3)
-        ttk.Button(btn_row, text="🗑 선택 항목 삭제 (재전송 허용)", command=self._delete_history_entry).pack(side="left", padx=3)
-        ttk.Button(btn_row, text="⚠️ 전체 이력 초기화", command=self._clear_all_history).pack(side="left", padx=3)
-        ttk.Button(btn_row, text="이력 JSON 내보내기", command=self._export_history_json).pack(side="right", padx=3)
-        ttk.Button(btn_row, text="이력 JSON 가져오기", command=self._import_history_json).pack(side="right", padx=3)
+        btn_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=10)
 
-        self.history_count_label = ttk.Label(ctrl_frame, text="", foreground=YELLOW_COLOR)
-        self.history_count_label.pack(anchor="e", padx=10, pady=(4, 0))
+        ctk.CTkButton(btn_row, text="🔄 새로고침", font=get_font(12, "bold"), width=105, height=34, command=self._refresh_history).pack(side="left", padx=3)
+        ctk.CTkButton(btn_row, text="🗑 선택 삭제 (재전송 허용)", font=get_font(12), width=165, height=34, fg_color=("#e9ecef", "#343a40"), text_color=COLOR_FG, command=self._delete_history_entry).pack(side="left", padx=3)
+        ctk.CTkButton(btn_row, text="⚠️ 전체 초기화", font=get_font(12, "bold"), width=120, height=34, fg_color=COLOR_DANGER[0], hover_color=COLOR_DANGER[1], command=self._clear_all_history).pack(side="left", padx=3)
 
-        hist_frame = ttk.LabelFrame(body, text=" 전송 완료된 포스트 목록 (최신 200건) ")
-        hist_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkButton(btn_row, text="JSON 내보내기", font=get_font(12), width=120, height=34, fg_color=("#e9ecef", "#343a40"), text_color=COLOR_FG, command=self._export_history_json).pack(side="right", padx=3)
+        ctk.CTkButton(btn_row, text="JSON 가져오기", font=get_font(12), width=120, height=34, fg_color=("#e9ecef", "#343a40"), text_color=COLOR_FG, command=self._import_history_json).pack(side="right", padx=3)
+
+        self.history_count_label = ctk.CTkLabel(ctrl_card, text="", font=get_font(13, "bold"), text_color=COLOR_WARNING[0])
+        self.history_count_label.pack(anchor="e", padx=12, pady=(0, 8))
+
+        hist_card = CardFrame(body, title="📋 전송 완료 포스트 이력", subtitle="더블 클릭 시 해당 기사 URL 복사")
+        hist_card.pack(fill="x", padx=8, pady=6)
 
         h_columns = ("site", "title", "synced_at", "url")
         self.hist_tree = create_scrolled_tree(
-            hist_frame, h_columns, height=10, selectmode="extended"
+            hist_card, h_columns, height=10, selectmode="extended"
         )
         self.hist_tree.heading("site", text="사이트")
         self.hist_tree.heading("title", text="제목")
         self.hist_tree.heading("synced_at", text="전송 시각")
         self.hist_tree.heading("url", text="URL")
-        self.hist_tree.column("site", width=120, minwidth=80, anchor="w")
-        self.hist_tree.column("title", width=280, minwidth=120, anchor="w")
+        self.hist_tree.column("site", width=130, minwidth=80, anchor="w")
+        self.hist_tree.column("title", width=300, minwidth=120, anchor="w")
         self.hist_tree.column("synced_at", width=150, minwidth=100, anchor="center")
         self.hist_tree.column("url", width=250, minwidth=120, anchor="w")
         self.hist_tree.bind("<Double-1>", self._on_history_double_click)
@@ -77,7 +83,7 @@ class HistoryTab(ttk.Frame):
             count = self.db.get_count()
         except SyncHistoryDbError as e:
             messagebox.showerror("이력 조회 실패", str(e))
-            self.history_count_label.config(text="이력 조회 실패")
+            self.history_count_label.configure(text="이력 조회 실패")
             return
         for row in rows:
             url = row[0]
@@ -93,7 +99,7 @@ class HistoryTab(ttk.Frame):
             self.hist_tree.insert("", "end", iid=iid, values=(
                 site_name or "", display_title, synced_at or "", url or ""
             ))
-        self.history_count_label.config(text=f"총 {count}건 기록됨")
+        self.history_count_label.configure(text=f"총 {count}건 기록됨")
 
     def _delete_history_entry(self):
         selected = self.hist_tree.selection()

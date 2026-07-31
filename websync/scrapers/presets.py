@@ -118,12 +118,12 @@ KOREAN_SITE_PRESETS: list[SitePreset] = [
 
 
 def preset_labels() -> list[str]:
-    return [p["label"] for p in KOREAN_SITE_PRESETS]
+    return [p.get("label") or "" for p in KOREAN_SITE_PRESETS]
 
 
 def get_preset_by_label(label: str) -> SitePreset | None:
     for p in KOREAN_SITE_PRESETS:
-        if p["label"] == label:
+        if p.get("label") == label:
             return p
     return None
 

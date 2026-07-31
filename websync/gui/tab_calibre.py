@@ -1,20 +1,24 @@
-"""Calibre 서재 연동 탭 컴포넌트"""
+"""Calibre 서재 연동 탭 컴포넌트 (CustomTkinter 기반)"""
+from __future__ import annotations
+
 import os
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
 
 from websync.gui.widgets import (
-    create_scrollable_frame, create_scrolled_tree
+    CardFrame, COLOR_CARD_BG, COLOR_FG, COLOR_SECONDARY_FG, COLOR_ACCENT,
+    COLOR_SUCCESS, COLOR_DANGER, get_font, create_scrollable_frame, create_scrolled_tree
 )
 from websync.integrations.notifier import ToastNotifier
 
 
-class CalibreTab(ttk.Frame):
-    """Calibre 서재 조회를 담당하는 탭"""
+class CalibreTab(ctk.CTkFrame):
+    """Calibre 서재 조회를 담당하는 탭 패널"""
 
     def __init__(self, parent, app):
-        super().__init__(parent)
+        super().__init__(parent, fg_color="transparent")
         self.app = app
         self.service = app.service
         self.calibre = app.calibre
@@ -24,53 +28,66 @@ class CalibreTab(ttk.Frame):
     def _build_ui(self):
         body = create_scrollable_frame(self)
 
-        calibre_top_frame = ttk.LabelFrame(body, text=" Calibre 연동 설정 ")
-        calibre_top_frame.pack(fill="x", padx=15, pady=10)
-        calibre_top_frame.columnconfigure(1, weight=1)
+        calibre_top_card = CardFrame(body, title="📚 Calibre 연동 설정", subtitle="calibredb.exe 실행파일 및 서재 DB 경로")
+        calibre_top_card.pack(fill="x", padx=8, pady=6)
 
-        ttk.Label(calibre_top_frame, text="calibredb.exe 경로:").grid(row=0, column=0, padx=10, pady=8, sticky="w")
-        self.calibre_entry = ttk.Entry(calibre_top_frame)
-        self.calibre_entry.grid(row=0, column=1, padx=5, pady=8, sticky="we")
-        ttk.Button(calibre_top_frame, text="찾아보기", command=self._browse_calibredb).grid(row=0, column=2, padx=5, pady=8)
-        self.calibre_conn_btn = ttk.Button(calibre_top_frame, text="연결 확인 & 서재 로드", command=self._test_and_load_calibre)
-        self.calibre_conn_btn.grid(row=0, column=3, padx=10, pady=8)
+        grid_frame = ctk.CTkFrame(calibre_top_card, fg_color="transparent")
+        grid_frame.pack(fill="x", padx=12, pady=10)
+        grid_frame.columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(grid_frame, text="calibredb.exe 경로:", font=get_font(13)).grid(row=0, column=0, padx=(0, 8), pady=6, sticky="w")
+        self.calibre_entry = ctk.CTkEntry(grid_frame, font=get_font(12), height=34)
+        self.calibre_entry.grid(row=0, column=1, padx=4, pady=6, sticky="we")
+
+        ctk.CTkButton(grid_frame, text="찾아보기", font=get_font(12), width=90, height=34, command=self._browse_calibredb).grid(row=0, column=2, padx=4, pady=6)
+        self.calibre_conn_btn = ctk.CTkButton(grid_frame, text="연결 확인 & 서재 로드", font=get_font(12, "bold"), height=34, command=self._test_and_load_calibre)
+        self.calibre_conn_btn.grid(row=0, column=3, padx=6, pady=6)
         self.app._bind_autosave(self.calibre_entry)
 
-        ttk.Label(calibre_top_frame, text="라이브러리 경로 (선택):").grid(row=1, column=0, padx=10, pady=8, sticky="w")
-        self.calibre_lib_entry = ttk.Entry(calibre_top_frame)
-        self.calibre_lib_entry.grid(row=1, column=1, padx=5, pady=8, sticky="we")
-        ttk.Button(calibre_top_frame, text="폴더 선택", command=self._browse_calibre_library).grid(row=1, column=2, padx=5, pady=8)
-        ttk.Label(
-            calibre_top_frame,
-            text="비워두면 Calibre 기본 라이브러리 사용",
-            font=("Malgun Gothic", 8),
-            foreground=self.app.style.lookup(".", "foreground") if hasattr(self.app, "style") else "#6c757d",
-        ).grid(row=1, column=3, padx=10, pady=8, sticky="w")
+        ctk.CTkLabel(grid_frame, text="라이브러리 경로 (선택):", font=get_font(13)).grid(row=1, column=0, padx=(0, 8), pady=6, sticky="w")
+        self.calibre_lib_entry = ctk.CTkEntry(grid_frame, font=get_font(12), height=34)
+        self.calibre_lib_entry.grid(row=1, column=1, padx=4, pady=6, sticky="we")
+
+        ctk.CTkButton(grid_frame, text="폴더 선택", font=get_font(12), width=90, height=34, command=self._browse_calibre_library).grid(row=1, column=2, padx=4, pady=6)
+        ctk.CTkLabel(
+            grid_frame,
+            text="비워두면 Calibre 기본 라이브러리 자동 탐색",
+            font=get_font(12),
+            text_color=COLOR_SECONDARY_FG,
+        ).grid(row=1, column=3, padx=6, pady=6, sticky="w")
         self.app._bind_autosave(self.calibre_lib_entry)
 
-        calibre_list_frame = ttk.LabelFrame(body, text=" 내 Calibre 서재 도서 목록 ")
-        calibre_list_frame.pack(fill="x", padx=15, pady=5)
+        calibre_list_card = CardFrame(body, title="📖 내 Calibre 서재 도서 목록", subtitle="목록에서 전송할 도서를 선택하세요 (다중 선택 가능)")
+        calibre_list_card.pack(fill="x", padx=8, pady=6)
 
         c_columns = ("id", "title", "authors", "formats")
         self.calibre_tree = create_scrolled_tree(
-            calibre_list_frame, c_columns, height=8, padx=10, pady=10
+            calibre_list_card, c_columns, height=8, padx=10, pady=10
         )
         self.calibre_tree.heading("id", text="ID")
         self.calibre_tree.heading("title", text="도서 제목")
         self.calibre_tree.heading("authors", text="저자")
         self.calibre_tree.heading("formats", text="보유 포맷")
-        self.calibre_tree.column("id", width=50, minwidth=40, anchor="center")
-        self.calibre_tree.column("title", width=320, minwidth=120, anchor="w")
-        self.calibre_tree.column("authors", width=180, minwidth=80, anchor="w")
+        self.calibre_tree.column("id", width=60, minwidth=40, anchor="center")
+        self.calibre_tree.column("title", width=340, minwidth=120, anchor="w")
+        self.calibre_tree.column("authors", width=200, minwidth=80, anchor="w")
         self.calibre_tree.column("formats", width=120, minwidth=80, anchor="center")
 
-        calibre_action_frame = ttk.Frame(body)
-        calibre_action_frame.pack(fill="x", padx=15, pady=10)
-        self.calibre_send_btn = ttk.Button(calibre_action_frame, text="★ 선택한 도서 X3 기기로 즉시 전송 (다중 선택 가능)", command=self._send_calibre_books)
-        self.calibre_send_btn.pack(fill="x", pady=5)
+        calibre_action_card = CardFrame(body)
+        calibre_action_card.pack(fill="x", padx=8, pady=6)
+
+        self.calibre_send_btn = ctk.CTkButton(
+            calibre_action_card,
+            text="★ 선택한 도서 X3 기기로 무선 전송 실행",
+            font=get_font(14, "bold"),
+            fg_color=COLOR_ACCENT[0],
+            hover_color=COLOR_ACCENT[1],
+            height=42,
+            command=self._send_calibre_books
+        )
+        self.calibre_send_btn.pack(fill="x", padx=12, pady=10)
 
     def _browse_calibredb(self):
-        from tkinter import filedialog
         f = filedialog.askopenfilename(title="calibredb.exe 실행파일 찾기", filetypes=[("Executable", "calibredb.exe"), ("All files", "*.*")])
         if f:
             self.calibre_entry.delete(0, tk.END)
@@ -78,7 +95,6 @@ class CalibreTab(ttk.Frame):
             self.app._save_ui_settings()
 
     def _browse_calibre_library(self):
-        from tkinter import filedialog
         d = filedialog.askdirectory(title="Calibre 라이브러리 폴더 선택 (metadata.db가 있는 폴더)")
         if d:
             self.calibre_lib_entry.delete(0, tk.END)
@@ -91,13 +107,13 @@ class CalibreTab(ttk.Frame):
         self.calibre.library_path = self.calibre_lib_entry.get().strip()
         if not silent:
             self.app._log_message("📚 Calibre 연결 확인 중...")
-            self.calibre_conn_btn.config(state="disabled")
+            self.calibre_conn_btn.configure(state="disabled")
         if not self.calibre.test_connection():
             if not silent:
                 self.app._log_message("❌ Calibre 연동 실패: 경로를 확인하세요.")
                 messagebox.showerror("Calibre 연동 실패", "calibredb.exe 경로를 찾지 못했습니다.")
                 if not self.app._sync_busy:
-                    self.calibre_conn_btn.config(state="normal")
+                    self.calibre_conn_btn.configure(state="normal")
             return
         def worker():
             books = self.calibre.list_books()
@@ -107,7 +123,7 @@ class CalibreTab(ttk.Frame):
 
     def _show_calibre_books(self, books: list, silent: bool):
         if not self.app._sync_busy:
-            self.calibre_conn_btn.config(state="normal")
+            self.calibre_conn_btn.configure(state="normal")
         for item in self.calibre_tree.get_children():
             self.calibre_tree.delete(item)
         if not books:
@@ -128,7 +144,7 @@ class CalibreTab(ttk.Frame):
             messagebox.showwarning("선택 누락", "전송할 도서를 선택해 주세요.")
             return
         self.app._save_ui_settings()
-        self.calibre_send_btn.config(state="disabled")
+        self.calibre_send_btn.configure(state="disabled")
         self.app._log_message(f"\n=== Calibre 책 {len(selected_items)}권 무선 전송 시작 ===")
 
         def task():
@@ -157,7 +173,7 @@ class CalibreTab(ttk.Frame):
 
     def _calibre_send_finished(self, success_cnt: int, total_cnt: int):
         if not self.app._sync_busy:
-            self.calibre_send_btn.config(state="normal")
+            self.calibre_send_btn.configure(state="normal")
         self.app._log_message(f"=== Calibre 도서 전송 종료: {success_cnt}/{total_cnt} 성공 ===\n")
         if success_cnt > 0:
             ToastNotifier.show_toast("Calibre 도서 동기화", f"{success_cnt}권 전송 완료.")

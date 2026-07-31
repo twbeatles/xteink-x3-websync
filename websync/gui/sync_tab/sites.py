@@ -92,7 +92,7 @@ class SyncSitesMixin:
         ttk.Label(
             form,
             text="선택 시 이름·유형·URL이 채워집니다 (수정 가능)",
-            font=("Malgun Gothic", 8),
+            font=("Malgun Gothic", 11),
             foreground=HINT_COLOR,
         ).grid(row=1, column=1, sticky="w")
 
@@ -156,14 +156,20 @@ class SyncSitesMixin:
         translate_cb = ttk.Combobox(opt_frame, values=["", "ko", "en", "ja", "zh-cn", "zh-tw"], width=6)
         translate_cb.pack(side="left")
         translate_cb.set("")
-        ttk.Label(opt_frame, text="(빈값=번역안함)", font=("Malgun Gothic", 8), foreground=HINT_COLOR).pack(side="left", padx=3)
+        ttk.Label(opt_frame, text="(빈값=번역안함)", font=("Malgun Gothic", 11), foreground=HINT_COLOR).pack(side="left", padx=3)
 
         def on_type_change(event=None):
             t = type_cb.get()
             state = "disabled" if t in SPECIALIZED_TYPES else "normal"
             for w in (item_entry, title_entry, content_entry, remove_entry):
-                w.config(state=state)
-            detail_cb.config(state="normal" if t == "css" else "disabled")
+                if hasattr(w, "configure"):
+                    w.configure(state=state)
+                elif hasattr(w, "config"):
+                    w.config(state=state)
+            if hasattr(detail_cb, "configure"):
+                detail_cb.configure(state="normal" if t == "css" else "disabled")
+            elif hasattr(detail_cb, "config"):
+                detail_cb.config(state="normal" if t == "css" else "disabled")
             if t != "css":
                 fetch_detail_var.set(False)
 

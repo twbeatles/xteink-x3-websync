@@ -1,20 +1,45 @@
-"""공통 위젯 및 테마 색상 상수"""
+"""공통 CustomTkinter 위젯, 테마 색상 상수 및 헬퍼 함수."""
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 
-# 라이트 테마 색상 정의 (Clean Light Theme)
-BG_COLOR      = "#f8f9fa" # 연한 회색 배경
-FG_COLOR      = "#212529" # 어두운 텍스트
-ACCENT_COLOR  = "#0d6efd" # 파란색 포인트
-SECONDARY_BG  = "#e9ecef" # 비활성 탭 및 서브 프레임 배경
-TEXT_BG       = "#ffffff" # 입력 필드, 리스트 박스 배경
-GREEN_COLOR   = "#198754" # 상태 양호 초록색
-RED_COLOR     = "#dc3545" # 에러 빨간색
-YELLOW_COLOR  = "#fd7e14" # 미확인/대기 주황색
-HINT_COLOR    = "#6c757d" # 보조 힌트 텍스트
+# CustomTkinter 기본 설정
+ctk.set_appearance_mode("System")  # "System", "Dark", "Light"
+ctk.set_default_color_theme("blue")  # "blue", "green", "dark-blue"
+
+FONT_FAMILY = "Malgun Gothic"
+
+def get_font(size: int = 12, weight: str = "normal") -> ctk.CTkFont:
+    """맑은 고딕 기반 CustomTkinter 폰트 생성 헬퍼."""
+    return ctk.CTkFont(family=FONT_FAMILY, size=size, weight=weight)
+
+# 테마 색상 정의 (Light, Dark 튜플)
+COLOR_BG            = ("#f8f9fa", "#1a1d20")  # 메인 창 배경
+COLOR_CARD_BG       = ("#ffffff", "#24282d")  # 카드 및 서브 패널 배경
+COLOR_CARD_BORDER   = ("#e9ecef", "#343a40")  # 카드 테두리
+COLOR_FG            = ("#212529", "#f8f9fa")  # 주 텍스트
+COLOR_SECONDARY_FG  = ("#6c757d", "#adb5bd")  # 보조 텍스트
+COLOR_ACCENT        = ("#0d6efd", "#3d8bfd")  # 포인트 파랑
+COLOR_SUCCESS       = ("#198754", "#20c997")  # 성공/초록
+COLOR_DANGER        = ("#dc3545", "#ea868f")  # 에러/빨강
+COLOR_WARNING       = ("#fd7e14", "#ff922b")  # 경고/주황
+
+# 기존 호환성용 단일 값 상수
+BG_COLOR      = "#f8f9fa"
+FG_COLOR      = "#212529"
+ACCENT_COLOR  = "#0d6efd"
+SECONDARY_BG  = "#e9ecef"
+TEXT_BG       = "#ffffff"
+GREEN_COLOR   = "#198754"
+RED_COLOR     = "#dc3545"
+YELLOW_COLOR  = "#fd7e14"
+HINT_COLOR    = "#6c757d"
 
 
 def center_window(window: tk.Misc, width: int | None = None, height: int | None = None) -> None:
+    """창을 화면 중앙에 배치합니다."""
     window.update_idletasks()
     w = width or window.winfo_width()
     h = height or window.winfo_height()
@@ -26,27 +51,101 @@ def center_window(window: tk.Misc, width: int | None = None, height: int | None 
         window.geometry(f"+{x}+{y}")
 
 
-def setup_dialog(dialog: tk.Toplevel, root: tk.Misc, width: int, height: int, *, resizable: bool = True) -> None:
+def setup_dialog(dialog: tk.Toplevel | ctk.CTkToplevel, root: tk.Misc, width: int, height: int, *, resizable: bool = True) -> None:
+    """모달 다이얼로그 초기 설정."""
     dialog.transient(root)
-    dialog.grab_set()
+    if hasattr(dialog, "grab_set"):
+        dialog.grab_set()
     dialog.resizable(resizable, resizable)
-    dialog.minsize(min(width, 420), min(height, 240))
+    dialog.minsize(min(width, 460), min(height, 260))
     center_window(dialog, width, height)
 
 
 def bind_widget_mousewheel(widget: tk.Misc, handler) -> None:
+    """마우스휠 스크롤 이벤트 재귀 바인딩."""
     widget.bind("<MouseWheel>", handler, add="+")
     for child in widget.winfo_children():
-        if child.winfo_class() in ("Treeview", "Text", "TCombobox", "TSpinbox"):
+        if child.winfo_class() in ("Treeview", "Text", "TCombobox", "TSpinbox", "CTkTextbox", "CTkScrollableFrame"):
             continue
         bind_widget_mousewheel(child, handler)
 
 
-def bind_text_mousewheel(text_widget: tk.Text) -> None:
+def bind_text_mousewheel(text_widget: tk.Text | ctk.CTkTextbox) -> None:
+    """텍스트 위젯 스크롤 바인딩."""
     def _on_mousewheel(event):
         text_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
         return "break"
     text_widget.bind("<MouseWheel>", _on_mousewheel)
+
+
+class CardFrame(ctk.CTkFrame):
+    """현대적인 둥근 모서리와 가독성이 높은 카드 패널 컴포넌트."""
+    def __init__(self, master, title: str | None = None, subtitle: str | None = None, **kwargs):
+        kwargs.setdefault("fg_color", COLOR_CARD_BG)
+        kwargs.setdefault("border_color", COLOR_CARD_BORDER)
+        kwargs.setdefault("border_width", 1)
+        kwargs.setdefault("corner_radius", 10)
+        super().__init__(master, **kwargs)
+
+        if title:
+            title_frame = ctk.CTkFrame(self, fg_color="transparent")
+            title_frame.pack(fill="x", padx=14, pady=(12, 6))
+            
+            title_lbl = ctk.CTkLabel(
+                title_frame,
+                text=title,
+                font=get_font(16, "bold"),
+                text_color=COLOR_FG,
+                anchor="w"
+            )
+            title_lbl.pack(side="left", fill="x", expand=True)
+
+            if subtitle:
+                sub_lbl = ctk.CTkLabel(
+                    title_frame,
+                    text=subtitle,
+                    font=get_font(12),
+                    text_color=COLOR_SECONDARY_FG,
+                    anchor="w"
+                )
+                sub_lbl.pack(side="left", padx=(10, 0))
+
+
+def apply_treeview_style(tree: ttk.Treeview) -> None:
+    """ttk.Treeview를 맑은 고딕 및 가독성 높인 커스텀 스타일로 적용합니다."""
+    style = ttk.Style()
+    
+    # 다크/라이트 모드 판단
+    mode = ctk.get_appearance_mode()
+    is_dark = (mode == "Dark")
+
+    bg = "#24282d" if is_dark else "#ffffff"
+    fg = "#f8f9fa" if is_dark else "#212529"
+    head_bg = "#1a1d20" if is_dark else "#e9ecef"
+    select_bg = "#0d6efd"
+
+    style.theme_use("clam")
+    style.configure(
+        "CTk.Treeview",
+        background=bg,
+        fieldbackground=bg,
+        foreground=fg,
+        rowheight=34,
+        borderwidth=0,
+        font=(FONT_FAMILY, 12)
+    )
+    style.map(
+        "CTk.Treeview",
+        background=[("selected", select_bg)],
+        foreground=[("selected", "#ffffff")]
+    )
+    style.configure(
+        "CTk.Treeview.Heading",
+        background=head_bg,
+        foreground=fg,
+        relief="flat",
+        font=(FONT_FAMILY, 12, "bold")
+    )
 
 
 def create_scrolled_tree(
@@ -59,13 +158,15 @@ def create_scrolled_tree(
     pady: int = 8,
     **tree_kwargs,
 ) -> ttk.Treeview:
-    """스크롤바가 붙은 Treeview를 생성합니다."""
-    wrapper = ttk.Frame(parent)
+    """CustomTkinter 스타일의 스크롤 Treeview를 생성합니다."""
+    wrapper = ctk.CTkFrame(parent, fg_color="transparent")
     wrapper.pack(fill="both", expand=True, padx=padx, pady=pady)
     wrapper.grid_rowconfigure(0, weight=1)
     wrapper.grid_columnconfigure(0, weight=1)
 
-    tree = ttk.Treeview(wrapper, columns=columns, show=show, height=height, **tree_kwargs)
+    tree = ttk.Treeview(wrapper, columns=columns, show=show, height=height, style="CTk.Treeview", **tree_kwargs)
+    apply_treeview_style(tree)
+
     vsb = ttk.Scrollbar(wrapper, orient="vertical", command=tree.yview)
     hsb = ttk.Scrollbar(wrapper, orient="horizontal", command=tree.xview)
     tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -76,36 +177,12 @@ def create_scrolled_tree(
     return tree
 
 
-def create_scrollable_frame(parent) -> ttk.Frame:
-    """세로 스크롤이 가능한 내부 프레임을 생성합니다."""
-    container = ttk.Frame(parent)
-    container.pack(fill="both", expand=True)
-
-    canvas = tk.Canvas(container, highlightthickness=0, bg=BG_COLOR)
-    scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
-    scrollable_frame = ttk.Frame(canvas)
-
-    def _on_frame_configure(_event=None):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    scrollable_frame.bind("<Configure>", _on_frame_configure)
-
-    window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-    def _on_canvas_configure(event):
-        canvas.itemconfig(window_id, width=event.width)
-
-    canvas.bind("<Configure>", _on_canvas_configure)
-    canvas.configure(yscrollcommand=scrollbar.set)
-
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-
-    def _on_mousewheel(event):
-        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        return "break"
-
-    bind_widget_mousewheel(scrollable_frame, _on_mousewheel)
-    canvas.bind("<MouseWheel>", _on_mousewheel)
-
+def create_scrollable_frame(parent) -> ctk.CTkScrollableFrame:
+    """CustomTkinter 세로 스크롤 가능 프레임을 생성합니다."""
+    scrollable_frame = ctk.CTkScrollableFrame(
+        parent,
+        fg_color="transparent",
+        corner_radius=0
+    )
+    scrollable_frame.pack(fill="both", expand=True)
     return scrollable_frame

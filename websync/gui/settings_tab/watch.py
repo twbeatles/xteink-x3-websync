@@ -26,8 +26,8 @@ class SettingsWatchMixin:
             if hasattr(self, "_watch_queue") and self._watch_queue is not None:
                 self._watch_queue.put(None)
                 self._watch_queue = None
-            self.watch_start_btn.config(text="▶ 감시 시작")
-            self.watch_status_label.config(text="감시 중지됨", foreground=RED_COLOR)
+            self.watch_start_btn.configure(text="▶ 감시 시작")
+            self.watch_status_label.configure(text="감시 중지됨", text_color=RED_COLOR)
         else:
             watch_dir = self.watch_dir_entry.get().strip()
             if not watch_dir or not os.path.isdir(watch_dir):
@@ -63,8 +63,8 @@ class SettingsWatchMixin:
 
             self.app._calibre_watcher = CalibreWatcher(watch_dir, on_new_file)
             if self.app._calibre_watcher.start():
-                self.watch_start_btn.config(text="■ 감시 중지")
-                self.watch_status_label.config(text=f"✅ 감시 중: {watch_dir}", foreground=GREEN_COLOR)
+                self.watch_start_btn.configure(text="■ 감시 중지")
+                self.watch_status_label.configure(text=f"✅ 감시 중: {watch_dir}", text_color=GREEN_COLOR)
                 self.app._log_message(f"👁 Calibre Watch 시작: {watch_dir}")
                 config = self.service.config
                 config["calibre_watch"] = {"enabled": True, "watch_dir": watch_dir}

@@ -22,9 +22,9 @@ class SettingsServersMixin:
         if self.app._opds_server and self.app._opds_server.is_running:
             self.app._opds_server.stop()
             self.app._opds_server = None
-            self.opds_start_btn.config(text="▶ 서버 시작")
-            self.opds_status_label.config(text="중지됨", foreground=RED_COLOR)
-            self.opds_url_label.config(text="")
+            self.opds_start_btn.configure(text="▶ 서버 시작")
+            self.opds_status_label.configure(text="중지됨", text_color=RED_COLOR)
+            self.opds_url_label.configure(text="")
         else:
             try:
                 port = int(self.opds_port_sp.get())
@@ -44,10 +44,10 @@ class SettingsServersMixin:
                 require_auth=allow_lan,
             )
             if self.app._opds_server.start():
-                self.opds_start_btn.config(text="■ 서버 중지")
-                self.opds_status_label.config(text="실행 중 ✅", foreground=GREEN_COLOR)
+                self.opds_start_btn.configure(text="■ 서버 중지")
+                self.opds_status_label.configure(text="실행 중 ✅", text_color=GREEN_COLOR)
                 url = self.app._opds_server.get_url()
-                self.opds_url_label.config(text=url)
+                self.opds_url_label.configure(text=url)
                 self.app._log_message(f"📡 OPDS 서버 시작: {url}")
                 self._refresh_opds_key_display()
             else:
@@ -57,9 +57,9 @@ class SettingsServersMixin:
         if self.app._web_dashboard and self.app._web_dashboard.is_running:
             self.app._web_dashboard.stop()
             self.app._web_dashboard = None
-            self.web_start_btn.config(text="▶ 서버 시작")
-            self.web_status_label.config(text="중지됨", foreground=RED_COLOR)
-            self.web_url_label.config(text="")
+            self.web_start_btn.configure(text="▶ 서버 시작")
+            self.web_status_label.configure(text="중지됨", text_color=RED_COLOR)
+            self.web_url_label.configure(text="")
         else:
             try:
                 port = int(self.web_port_sp.get())
@@ -96,10 +96,10 @@ class SettingsServersMixin:
                 ):
                     return
             if self.app._web_dashboard.start():
-                self.web_start_btn.config(text="■ 서버 중지")
-                self.web_status_label.config(text="실행 중 ✅", foreground=GREEN_COLOR)
+                self.web_start_btn.configure(text="■ 서버 중지")
+                self.web_status_label.configure(text="실행 중 ✅", text_color=GREEN_COLOR)
                 url = self.app._web_dashboard.get_url()
-                self.web_url_label.config(text=url)
+                self.web_url_label.configure(text=url)
                 self.app._log_message(f"🌐 웹 대시보드 시작: {url}")
                 self._refresh_web_token_display()
             else:

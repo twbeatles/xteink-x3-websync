@@ -40,7 +40,7 @@ class SyncScheduleMixin:
 
     def _refresh_schedule_status(self):
         status = self.scheduler.get_task_status()
-        self.sched_status_label.config(text=f"스케줄러 상태: {status}")
+        self.sched_status_label.configure(text=f"스케줄러 상태: {status}")
 
     # ------------------------------------------------------------------
     # 추가 기기 관리 팝업

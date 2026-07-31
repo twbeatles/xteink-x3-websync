@@ -1,4 +1,4 @@
-"""공유 데이터 폴더 (OneDrive 등) 설정 UI."""
+"""공유 데이터 폴더 (OneDrive 등) 설정 UI (CustomTkinter 카드 기반)."""
 from __future__ import annotations
 
 import os
@@ -6,6 +6,7 @@ import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
 
 from websync.backup.portable_cfg import (
     HISTORY_MODE_GLOBAL_URL,
@@ -14,7 +15,10 @@ from websync.backup.portable_cfg import (
     get_portable_cfg,
     normalize_history_mode,
 )
-from websync.gui.widgets import HINT_COLOR, GREEN_COLOR, RED_COLOR, ACCENT_COLOR
+from websync.gui.widgets import (
+    CardFrame, COLOR_CARD_BG, COLOR_FG, COLOR_SECONDARY_FG, COLOR_ACCENT,
+    COLOR_SUCCESS, COLOR_DANGER, COLOR_WARNING, get_font
+)
 
 
 _HISTORY_MODE_LABELS = {
@@ -25,115 +29,116 @@ _LABEL_TO_MODE = {v: k for k, v in _HISTORY_MODE_LABELS.items()}
 
 
 class SettingsBackupSyncMixin:
-    def _build_backup_sync_section(self, body: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(body, text=" ☁ 공유 데이터 폴더 (OneDrive / Google Drive 등) ")
-        frame.pack(fill="x", padx=15, pady=10)
-        frame.columnconfigure(1, weight=1)
+    def _build_backup_sync_section(self, body) -> None:
+        card = CardFrame(body, title="☁ 공유 데이터 폴더 (OneDrive / Google Drive 등)", subtitle="구독 목록 및 이력 멀티 PC 공유")
+        card.pack(fill="x", padx=8, pady=6)
 
-        ttk.Label(
-            frame,
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=10)
+        inner.columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            inner,
             text="사이트 구독 목록과 전송 이력의 공식 저장소입니다. "
-                 "PC를 바꿔도 이 폴더만 연결하면 새 글만 동기화됩니다. "
-                 "기기 IP·Calibre 경로·API 키는 포함하지 않습니다. "
-                 "SQLite(sync_history.db)를 이 폴더에 두지 마세요.",
-            font=("Malgun Gothic", 8),
-            foreground=HINT_COLOR,
-            wraplength=640,
+                 "PC를 바꿔도 이 폴더만 연결하면 새 글만 동기화됩니다.",
+            font=get_font(12),
+            text_color=COLOR_SECONDARY_FG,
             justify="left",
-        ).grid(row=0, column=0, columnspan=4, padx=10, pady=(8, 4), sticky="w")
+        ).grid(row=0, column=0, columnspan=4, padx=4, pady=(0, 6), sticky="w")
 
         self.backup_enabled_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            frame,
+        ctk.CTkCheckBox(
+            inner,
             text="공유 데이터 폴더 사용",
+            font=get_font(12),
             variable=self.backup_enabled_var,
             command=self._save_backup_sync_settings,
-        ).grid(row=1, column=0, columnspan=2, padx=10, pady=4, sticky="w")
+        ).grid(row=1, column=0, columnspan=2, padx=4, pady=4, sticky="w")
 
-        ttk.Label(frame, text="데이터 폴더:").grid(row=2, column=0, padx=10, pady=6, sticky="w")
-        self.backup_folder_entry = ttk.Entry(frame)
-        self.backup_folder_entry.grid(row=2, column=1, padx=5, pady=6, sticky="we")
-        ttk.Button(frame, text="폴더 선택", command=self._browse_backup_folder).grid(
-            row=2, column=2, padx=5, pady=6
+        ctk.CTkLabel(inner, text="데이터 폴더:", font=get_font(13)).grid(row=2, column=0, padx=(0, 6), pady=6, sticky="w")
+        self.backup_folder_entry = ctk.CTkEntry(inner, font=get_font(12), height=34)
+        self.backup_folder_entry.grid(row=2, column=1, padx=4, pady=6, sticky="we")
+        ctk.CTkButton(inner, text="폴더 선택", font=get_font(12), width=90, height=34, command=self._browse_backup_folder).grid(
+            row=2, column=2, padx=4, pady=6
         )
-        ttk.Button(frame, text="폴더 열기", command=self._open_backup_folder).grid(
-            row=2, column=3, padx=5, pady=6
+        ctk.CTkButton(inner, text="폴더 열기", font=get_font(12), width=90, height=34, fg_color=("#e9ecef", "#343a40"), text_color=COLOR_FG, command=self._open_backup_folder).grid(
+            row=2, column=3, padx=4, pady=6
         )
         self.app._bind_autosave(self.backup_folder_entry)
 
         self.backup_include_history_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            frame,
+        ctk.CTkCheckBox(
+            inner,
             text="전송 이력(synced_posts.json) 포함",
+            font=get_font(12),
             variable=self.backup_include_history_var,
             command=self._save_backup_sync_settings,
-        ).grid(row=3, column=0, columnspan=2, padx=10, pady=2, sticky="w")
+        ).grid(row=3, column=0, columnspan=2, padx=4, pady=2, sticky="w")
 
         self.backup_auto_import_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            frame,
+        ctk.CTkCheckBox(
+            inner,
             text="시작 시 / 동기화 전 가져오기",
+            font=get_font(12),
             variable=self.backup_auto_import_var,
             command=self._save_backup_sync_settings,
-        ).grid(row=4, column=0, columnspan=2, padx=10, pady=2, sticky="w")
+        ).grid(row=4, column=0, columnspan=2, padx=4, pady=2, sticky="w")
 
         self.backup_auto_export_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            frame,
+        ctk.CTkCheckBox(
+            inner,
             text="변경·동기화 후 자동 내보내기",
+            font=get_font(12),
             variable=self.backup_auto_export_var,
             command=self._save_backup_sync_settings,
-        ).grid(row=5, column=0, columnspan=2, padx=10, pady=2, sticky="w")
+        ).grid(row=5, column=0, columnspan=2, padx=4, pady=2, sticky="w")
 
-        ttk.Label(frame, text="이력 판정 모드:").grid(row=6, column=0, padx=10, pady=6, sticky="w")
-        self.backup_history_mode_cb = ttk.Combobox(
-            frame,
+        ctk.CTkLabel(inner, text="이력 판정 모드:", font=get_font(13)).grid(row=6, column=0, padx=(0, 6), pady=6, sticky="w")
+        self.backup_history_mode_cb = ctk.CTkOptionMenu(
+            inner,
             values=list(_HISTORY_MODE_LABELS.values()),
-            state="readonly",
-            width=42,
+            font=get_font(12),
+            width=340,
+            command=lambda _v: self._save_backup_sync_settings()
         )
         self.backup_history_mode_cb.set(_HISTORY_MODE_LABELS[HISTORY_MODE_PER_DEVICE])
-        self.backup_history_mode_cb.grid(row=6, column=1, columnspan=2, padx=5, pady=6, sticky="w")
-        self.backup_history_mode_cb.bind("<<ComboboxSelected>>", lambda _e: self._save_backup_sync_settings())
+        self.backup_history_mode_cb.grid(row=6, column=1, columnspan=2, padx=4, pady=6, sticky="w")
 
-        self.backup_history_mode_hint = ttk.Label(
-            frame,
-            text="PC 간 기기 IP가 다르면 「URL 전역 이력」을 권장합니다. 다중 리더기는 「기기별」이 안전합니다.",
-            font=("Malgun Gothic", 8),
-            foreground=HINT_COLOR,
-            wraplength=640,
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        ctk.CTkButton(
+            btn_row,
+            text="☁ 지금 공유 폴더와 동기화 (Pull & Push)",
+            font=get_font(13, "bold"),
+            fg_color=COLOR_ACCENT[0],
+            hover_color=COLOR_ACCENT[1],
+            height=38,
+            command=self._run_backup_sync_now,
+        ).pack(side="left", padx=4)
+
+        self.backup_status_label = ctk.CTkLabel(
+            btn_row,
+            text="",
+            font=get_font(12),
+            text_color=COLOR_SECONDARY_FG,
         )
-        self.backup_history_mode_hint.grid(row=7, column=0, columnspan=4, padx=10, pady=(0, 4), sticky="w")
-
-        btn_row = ttk.Frame(frame)
-        btn_row.grid(row=8, column=0, columnspan=4, padx=10, pady=8, sticky="w")
-        ttk.Button(btn_row, text="지금 동기화", command=self._run_backup_sync_now).pack(side="left", padx=3)
-        ttk.Button(btn_row, text="설정 저장", command=self._save_backup_sync_settings).pack(side="left", padx=3)
-
-        self.backup_status_label = ttk.Label(frame, text="", foreground=HINT_COLOR, wraplength=640)
-        self.backup_status_label.grid(row=9, column=0, columnspan=4, padx=10, pady=(0, 8), sticky="w")
+        self.backup_status_label.pack(side="left", padx=10)
 
     def _browse_backup_folder(self):
-        path = filedialog.askdirectory(title="공유 데이터 폴더 선택 (OneDrive 등)")
-        if not path:
-            return
-        self.backup_folder_entry.delete(0, "end")
-        self.backup_folder_entry.insert(0, path)
-        self._save_backup_sync_settings()
+        d = filedialog.askdirectory(title="공유 데이터 폴더 선택 (OneDrive 등)")
+        if d:
+            self.backup_folder_entry.delete(0, tk.END)
+            self.backup_folder_entry.insert(0, d)
+            self._save_backup_sync_settings()
 
     def _open_backup_folder(self):
         folder = self.backup_folder_entry.get().strip()
-        if not folder:
-            messagebox.showinfo("안내", "데이터 폴더를 먼저 지정해 주세요.")
+        if not folder or not os.path.isdir(folder):
+            messagebox.showwarning("경고", "올바른 공유 폴더가 설정되지 않았습니다.")
             return
-        if not os.path.isdir(folder):
-            try:
-                os.makedirs(folder, exist_ok=True)
-            except OSError as e:
-                messagebox.showerror("오류", f"폴더를 만들 수 없습니다:\n{e}")
-                return
         try:
-            if sys.platform == "win32":
+            if os.name == "nt":
                 os.startfile(folder)  # type: ignore[attr-defined]
             elif sys.platform == "darwin":
                 import subprocess
@@ -172,35 +177,34 @@ class SettingsBackupSyncMixin:
     def _load_backup_sync_from_config(self, config: dict) -> None:
         bs = get_portable_cfg(config)
         self.backup_enabled_var.set(bool(bs.get("enabled", False)))
-        self.backup_folder_entry.delete(0, "end")
+        self.backup_folder_entry.delete(0, tk.END)
         self.backup_folder_entry.insert(0, bs.get("folder", "") or "")
         self.backup_include_history_var.set(bool(bs.get("include_history", True)))
         self.backup_auto_import_var.set(bool(bs.get("auto_import_on_start", True)))
         self.backup_auto_export_var.set(bool(bs.get("auto_export", True)))
-        mode = normalize_history_mode(bs.get("history_mode"))
+        m = normalize_history_mode(bs.get("history_mode"))
+        label = _HISTORY_MODE_LABELS.get(m, _HISTORY_MODE_LABELS[HISTORY_MODE_PER_DEVICE])
         if hasattr(self, "backup_history_mode_cb"):
-            self.backup_history_mode_cb.set(
-                _HISTORY_MODE_LABELS.get(mode, _HISTORY_MODE_LABELS[HISTORY_MODE_PER_DEVICE])
-            )
+            self.backup_history_mode_cb.set(label)
         self._refresh_backup_status_label(config)
 
     def _refresh_backup_status_label(self, config: dict | None = None) -> None:
-        cfg = config if config is not None else self.service.config
+        cfg = config or self.service.config
         bs = get_portable_cfg(cfg)
-        last_at = bs.get("last_sync_at") or ""
-        last_msg = bs.get("last_sync_message") or ""
-        mode = normalize_history_mode(bs.get("history_mode"))
-        mode_label = _HISTORY_MODE_LABELS.get(mode, mode)
-        if last_at or last_msg:
-            text = f"최근 동기화: {last_at}  {last_msg}  |  모드: {mode_label}".strip()
-            color = GREEN_COLOR
+        hm = normalize_history_mode(bs.get("history_mode"))
+        mode_label = "기기별" if hm == HISTORY_MODE_PER_DEVICE else "전역URL"
+        last = bs.get("last_sync_at") or ""
+
+        if bs.get("enabled") and last:
+            text = f"상태: 마지막 동기화 {last}  |  모드: {mode_label}"
+            color = COLOR_SUCCESS[0]
         elif bs.get("enabled") and bs.get("folder"):
-            text = f"활성화됨 — 아직 동기화 기록이 없습니다. 「지금 동기화」를 눌러 주세요.  |  모드: {mode_label}"
-            color = ACCENT_COLOR
+            text = f"활성화됨 — 아직 동기화 기록이 없습니다.  |  모드: {mode_label}"
+            color = COLOR_ACCENT[0]
         else:
-            text = "비활성 — OneDrive 등 공유 폴더를 지정하고 사용을 켜 주세요."
-            color = HINT_COLOR
-        self.backup_status_label.config(text=text, foreground=color)
+            text = "비활성 — 공유 데이터 폴더를 지정하고 사용을 켜 주세요."
+            color = COLOR_SECONDARY_FG
+        self.backup_status_label.configure(text=text, text_color=color)
 
     def _run_backup_sync_now(self):
         self._save_backup_sync_settings()
@@ -210,7 +214,7 @@ class SettingsBackupSyncMixin:
             messagebox.showwarning("폴더 필요", "데이터 폴더를 먼저 선택해 주세요.")
             return
 
-        self.backup_status_label.config(text="동기화 중…", foreground=ACCENT_COLOR)
+        self.backup_status_label.configure(text="동기화 중…", text_color=COLOR_ACCENT[0])
         self.app._log_message("☁ 공유 데이터 폴더 동기화를 실행합니다...")
 
         def task():
@@ -238,15 +242,15 @@ class SettingsBackupSyncMixin:
                             "공유 데이터 동기화 실패",
                             msg or "동기화에 실패했습니다. 로그를 확인하세요.",
                         )
-                        self.backup_status_label.config(
-                            text=msg or "동기화 실패", foreground=RED_COLOR
+                        self.backup_status_label.configure(
+                            text=msg or "동기화 실패", text_color=COLOR_DANGER[0]
                         )
 
                 self.app.root.after(0, done)
             except Exception as e:
                 def err():
                     messagebox.showerror("공유 데이터 동기화 오류", str(e))
-                    self.backup_status_label.config(text=str(e), foreground=RED_COLOR)
+                    self.backup_status_label.configure(text=str(e), text_color=COLOR_DANGER[0])
 
                 self.app.root.after(0, err)
 

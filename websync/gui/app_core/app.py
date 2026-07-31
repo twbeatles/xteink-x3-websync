@@ -7,6 +7,7 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
+import customtkinter as ctk
 
 from websync.integrations.calibre import CalibreManager
 from websync.core.paths import resolve_path
@@ -17,7 +18,7 @@ from websync.pipeline.service import SyncService
 from websync.core.logger import get_log_dir
 from websync.config.exceptions import ConfigSaveError
 from websync.gui.widgets import (
-    BG_COLOR, FG_COLOR, ACCENT_COLOR, SECONDARY_BG, TEXT_BG, GREEN_COLOR, RED_COLOR, YELLOW_COLOR, HINT_COLOR,
+    COLOR_BG, COLOR_CARD_BG, COLOR_FG, COLOR_ACCENT, FONT_FAMILY, get_font,
     center_window, setup_dialog
 )
 from websync.gui.tab_sync import SyncTab
@@ -39,7 +40,7 @@ class SyncAppGui(
     AppConfigSyncMixin,
     AppSyncControlMixin,
 ):
-    """Tkinter 탭형 인터페이스 및 동기화 비즈니스 중개 GUI 컨트롤러"""
+    """CustomTkinter 기반 현대적 GUI 컨트롤러"""
     def __init__(self, service: SyncService):
         self.service = service
         self.scheduler = SchedulerManager()
@@ -53,17 +54,38 @@ class SyncAppGui(
         self._web_dashboard = None
         self._calibre_watcher = None
 
-        self.root = tk.Tk()
+        self.root = ctk.CTk()
         self.root.title("Xteink X3 WebSync Manager")
-        # 고 DPI(125%/150%/200%)에서도 하단 동기화 바가 잘리지 않도록
-        # 화면 비율 기반으로 초기 크기를 잡고, 최소 높이를 충분히 확보한다.
+
+        # 테마 모드 설정 (config에서 불러온 값 또는 System)
+        appearance_mode = self.service.config.get("appearance_mode", "System")
+        ctk.set_appearance_mode(appearance_mode)
+        ctk.set_default_color_theme("blue")
+
+        # 고 DPI 대응 창 크기
         init_w, init_h = self._preferred_window_size()
         self.root.geometry(f"{init_w}x{init_h}")
-        self.root.minsize(720, 620)
+        self.root.minsize(780, 640)
         self.root.resizable(True, True)
+
 
         self._sync_busy = False
         self._bottom_pane_adjusted = False
+
+        # CustomTkinter 전역 기본 폰트를 맑은 고딕으로 오버라이드
+        ctk.FontManager.init_font_manager()
+        if hasattr(ctk.FontManager, 'windows_default_font'):
+            ctk.FontManager.windows_default_font = FONT_FAMILY
+        if hasattr(ctk.FontManager, 'linux_default_font'):
+            ctk.FontManager.linux_default_font = FONT_FAMILY
+        # tkinter 기본 폰트도 맑은 고딕으로 설정
+        import tkinter.font as tkfont
+        for fname in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkFixedFont"):
+            try:
+                f = tkfont.nametofont(fname)
+                f.configure(family=FONT_FAMILY, size=12)
+            except Exception:
+                pass
 
         self._setup_styles()
         self._build_ui()

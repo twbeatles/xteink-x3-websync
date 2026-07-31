@@ -149,7 +149,8 @@ class BackupSyncService:
             # --- sites ---
             remote_sites_payload = read_json_safe(sites_path)
             remote_sites, remote_sites_at = extract_sites(remote_sites_payload)
-            local_sites = config.get("sites") if isinstance(config.get("sites"), list) else []
+            raw_sites = config.get("sites")
+            local_sites: list[dict] = raw_sites if isinstance(raw_sites, list) else []
             last_sites_push = bs.get("last_sites_push_at")
             remote_wins = is_remote_newer(remote_sites_at, last_sites_push if isinstance(last_sites_push, str) else None)
 
