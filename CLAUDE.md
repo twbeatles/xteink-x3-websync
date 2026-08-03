@@ -36,6 +36,7 @@ xteink-x3-websync/
 │   │   └── history.py         # SQLite 동기화 이력 — timeout=10.0
 │   ├── scrapers/
 │   │   ├── base.py / types.py / presets.py   # 공통·타입 상수·한국 추천 프리셋
+│   │   ├── selector_assistant.py  # CSS 선택자 도우미(분석·추천·RSS 프로브, GUI 비의존)
 │   │   ├── css.py / rss.py / velog.py / naver.py / tistory.py / brunch.py / newneek.py
 │   │   ├── youtube.py / substack.py / naver_cafe.py / naver_post.py
 │   │   ├── soonsal.py / moneyletter.py / newsletter_base.py
@@ -78,7 +79,7 @@ xteink-x3-websync/
 │   └── gui/
 │       ├── widgets.py         # 공통 위젯 및 테마 색상 상수
 │       ├── app_core/          # SyncAppGui (layout/helpers/config_sync/sync_control)
-│       ├── sync_tab/          # 뉴스 동기화 탭 (connection/devices/sites/schedule/preview)
+│       ├── sync_tab/          # 뉴스 동기화 탭 (connection/devices/sites/schedule/preview/selector_wizard)
 │       ├── device_files/      # 기기 파일 탭 (browser/actions/cleanup/settings)
 │       ├── settings_tab/      # 고급 설정 (epub/servers/watch/ai_translation/backup_sync)
 │       ├── tab_*.py           # 하위 호환 re-export (sync/device_files/settings)
@@ -175,6 +176,7 @@ main()
       "url": "https://...",
       "item_selector": ".post-item",
       "title_selector": ".post-title",
+      "link_selector": "a[href]",
       "content_selector": ".post-content",
       "remove_selectors": ".ad, #comments",
       "limit": 5,
@@ -235,7 +237,8 @@ run_sync_pipeline()
 | 클래스 | 타입 | 방식 |
 |--------|------|------|
 | `BaseScraper` | ABC | 추상 기반 클래스 |
-| `CssSelectorScraper` | `"css"` | CSS 선택자; 옵션 `fetch_detail_page` 시 상세 URL 본문 |
+| `CssSelectorScraper` | `"css"` | CSS 선택자(`item`/`title`/`link`/`content`); `fetch_detail_page` 시 상세 본문 + 폴백 |
+| (도우미) | — | `selector_assistant` + GUI `selector_wizard`: 페이지 분석·RSS 권장·선택자 추천/테스트/미리보기 |
 | `RssScraper` | `"rss"` | RSS/Atom XML 파싱 |
 | `NaverBlogScraper` | `"naver"` | RSS 리스팅 + PostView.naver iframe 우회 |
 | `VelogScraper` | `"velog"` | 프로필 URL → Velog RSS 래퍼 |

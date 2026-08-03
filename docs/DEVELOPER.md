@@ -56,7 +56,9 @@ GUI·validator·factory 가 이 목록을 공유합니다.
 
 | 타입 | 모듈 | 비고 |
 |------|------|------|
-| `css` | `css.py` | 사용자 CSS 선택자 |
+| `css` | `css.py` | 사용자 CSS 선택자 (`link_selector`, 상세 본문 폴백, 폴백 통계) |
+| (도우미) | `selector_assistant.py` | 페이지 분석·선택자 추천·RSS 프로브·사설 URL 감지 (GUI 비의존) |
+| (GUI) | `gui/sync_tab/selector_wizard.py` | 사이트 등록 시 분석/테스트/미리보기 패널 (스레드 안전) |
 | `rss` | `rss.py` | RSS/Atom |
 | `velog` | `velog.py` | 프로필 URL → Velog RSS |
 | `naver` | `naver.py` | 네이버 블로그 |

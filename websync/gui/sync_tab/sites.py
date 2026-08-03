@@ -15,6 +15,14 @@ from websync.upload.uploader import X3Uploader, normalize_device_host
 from websync.config.exceptions import ConfigSaveError, ConfigLoadError
 from websync.scrapers.types import SCRAPER_TYPES, SPECIALIZED_TYPES
 from websync.scrapers.presets import preset_labels, get_preset_by_label
+from websync.gui.sync_tab.selector_wizard import (
+    SelectorWizardPanel,
+    ROLE_ITEM,
+    ROLE_TITLE,
+    ROLE_LINK,
+    ROLE_CONTENT,
+    ROLE_REMOVE,
+)
 
 
 class SyncSitesMixin:
@@ -70,7 +78,7 @@ class SyncSitesMixin:
         dialog = tk.Toplevel(self.app.root)
         dialog.title(title)
         dialog.configure(bg=BG_COLOR)
-        setup_dialog(dialog, self.app.root, 580, 600)
+        setup_dialog(dialog, self.app.root, 720, 780)
 
         content = ttk.Frame(dialog)
         content.pack(fill="both", expand=True)
@@ -127,10 +135,22 @@ class SyncSitesMixin:
         title_entry.grid(row=1, column=1, sticky="w", pady=5)
         title_entry.insert(0, ".post-title")
 
-        ttk.Label(css_frame, text="본문 선택자:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(css_frame, text="링크 선택자:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        link_entry = ttk.Entry(css_frame, width=28)
+        link_entry.grid(row=2, column=1, sticky="w", pady=5)
+        link_entry.insert(0, "a[href]")
+
+        ttk.Label(css_frame, text="본문 선택자:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
         content_entry = ttk.Entry(css_frame, width=28)
-        content_entry.grid(row=2, column=1, sticky="w", pady=5)
+        content_entry.grid(row=3, column=1, sticky="w", pady=5)
         content_entry.insert(0, ".post-content")
+
+        ttk.Label(
+            css_frame,
+            text="제목·링크·본문은 아이템 내부 기준 (상대 선택자)",
+            font=("Malgun Gothic", 10),
+            foreground=HINT_COLOR,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 4))
 
         ttk.Label(form, text="불필요 요소 제거 CSS:").grid(row=6, column=0, sticky="w", pady=8)
         remove_entry = ttk.Entry(form, width=40)
@@ -158,10 +178,86 @@ class SyncSitesMixin:
         translate_cb.set("")
         ttk.Label(opt_frame, text="(빈값=번역안함)", font=("Malgun Gothic", 11), foreground=HINT_COLOR).pack(side="left", padx=3)
 
+        def _fill_entry(entry: ttk.Entry, value: str) -> None:
+            entry.configure(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, value)
+
+        def set_selector_entry(role: str, value: str) -> None:
+            mapping = {
+                ROLE_ITEM: item_entry,
+                ROLE_TITLE: title_entry,
+                ROLE_LINK: link_entry,
+                ROLE_CONTENT: content_entry,
+                ROLE_REMOVE: remove_entry,
+            }
+            ent = mapping.get(role)
+            if ent is not None:
+                _fill_entry(ent, value)
+
+        def get_selector_entries() -> dict:
+            return {
+                "item": item_entry.get().strip(),
+                "title": title_entry.get().strip(),
+                "link": link_entry.get().strip(),
+                "content": content_entry.get().strip(),
+                "remove": remove_entry.get().strip(),
+            }
+
+        def get_site_snapshot() -> dict:
+            try:
+                lim = int(limit_entry.get().strip() or "3")
+            except ValueError:
+                lim = 3
+            return {
+                "name": name_entry.get().strip() or "preview",
+                "type": type_cb.get() or "css",
+                "url": url_entry.get().strip(),
+                "item_selector": item_entry.get().strip(),
+                "title_selector": title_entry.get().strip(),
+                "link_selector": link_entry.get().strip() or "a[href]",
+                "content_selector": content_entry.get().strip(),
+                "remove_selectors": remove_entry.get().strip(),
+                "limit": lim,
+                "include_images": bool(include_img_var.get()),
+                "fetch_detail_page": bool(fetch_detail_var.get()),
+            }
+
+        def apply_site_config(cfg: dict) -> None:
+            """분석 추천 결과를 폼에 반영."""
+            if not cfg:
+                return
+            if cfg.get("name") and not name_entry.get().strip():
+                name_entry.delete(0, tk.END)
+                name_entry.insert(0, cfg.get("name") or "")
+            if cfg.get("type"):
+                type_cb.set(cfg["type"])
+            if cfg.get("url"):
+                _fill_entry(url_entry, cfg["url"])
+            if cfg.get("limit") is not None:
+                limit_entry.delete(0, tk.END)
+                limit_entry.insert(0, str(cfg.get("limit", 5)))
+            if "fetch_detail_page" in cfg:
+                fetch_detail_var.set(bool(cfg.get("fetch_detail_page")))
+            if "include_images" in cfg:
+                include_img_var.set(bool(cfg.get("include_images")))
+            if (cfg.get("type") or type_cb.get()) == "css":
+                if cfg.get("item_selector"):
+                    _fill_entry(item_entry, cfg["item_selector"])
+                if cfg.get("title_selector"):
+                    _fill_entry(title_entry, cfg["title_selector"])
+                if cfg.get("link_selector"):
+                    _fill_entry(link_entry, cfg["link_selector"])
+                if cfg.get("content_selector"):
+                    _fill_entry(content_entry, cfg["content_selector"])
+                if cfg.get("remove_selectors") is not None:
+                    _fill_entry(remove_entry, cfg.get("remove_selectors") or "")
+            on_type_change()
+
         def on_type_change(event=None):
             t = type_cb.get()
             state = "disabled" if t in SPECIALIZED_TYPES else "normal"
-            for w in (item_entry, title_entry, content_entry, remove_entry):
+            for w in (item_entry, title_entry, link_entry, content_entry, remove_entry):
                 if hasattr(w, "configure"):
                     w.configure(state=state)
                 elif hasattr(w, "config"):
@@ -193,6 +289,29 @@ class SyncSitesMixin:
         type_cb.bind("<<ComboboxSelected>>", on_type_change)
         preset_cb.bind("<<ComboboxSelected>>", on_preset_change)
 
+        # 선택자 도우미 (페이지 분석 / DOM 픽 / 테스트 / 미리보기)
+        def _pipeline_running() -> bool:
+            try:
+                return bool(self.service.is_pipeline_running())
+            except Exception:
+                return False
+
+        wizard = SelectorWizardPanel(
+            form,
+            dialog,
+            get_url=lambda: url_entry.get(),
+            get_entries=get_selector_entries,
+            set_entry=set_selector_entry,
+            set_type=lambda t: type_cb.set(t),
+            set_url=lambda u: (_fill_entry(url_entry, u)),
+            get_site_snapshot=get_site_snapshot,
+            on_type_change=on_type_change,
+            apply_site_config=apply_site_config,
+            is_pipeline_running=_pipeline_running,
+        )
+        wizard.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=10)
+        form.rowconfigure(9, weight=1)
+
         if site_data:
             name_entry.insert(0, site_data.get("name", ""))
             type_cb.set(site_data.get("type", "css"))
@@ -200,6 +319,8 @@ class SyncSitesMixin:
             item_entry.delete(0, tk.END); item_entry.insert(0, site_data.get("item_selector", ".post-item"))
             title_elem = site_data.get("title_selector", ".post-title")
             title_entry.delete(0, tk.END); title_entry.insert(0, title_elem)
+            link_entry.delete(0, tk.END)
+            link_entry.insert(0, site_data.get("link_selector", "a[href]"))
             content_entry.delete(0, tk.END); content_entry.insert(0, site_data.get("content_selector", ".post-content"))
             remove_entry.delete(0, tk.END); remove_entry.insert(0, site_data.get("remove_selectors", ""))
             limit_entry.delete(0, tk.END); limit_entry.insert(0, str(site_data.get("limit", 5)))
@@ -234,9 +355,54 @@ class SyncSitesMixin:
                 "fetch_detail_page": bool(fetch_detail_var.get()) if type_cb.get() == "css" else False,
             }
             if type_cb.get() == "css":
-                new_site["item_selector"] = item_entry.get().strip()
-                new_site["title_selector"] = title_entry.get().strip()
-                new_site["content_selector"] = content_entry.get().strip()
+                item_sel = item_entry.get().strip()
+                title_sel = title_entry.get().strip()
+                content_sel = content_entry.get().strip()
+                if not item_sel:
+                    messagebox.showerror(
+                        "오류",
+                        "CSS 타입은 아이템 컨테이너 선택자가 필수입니다.",
+                        parent=dialog,
+                    )
+                    return
+                if not title_sel:
+                    messagebox.showerror(
+                        "오류",
+                        "CSS 타입은 제목 선택자가 필수입니다.",
+                        parent=dialog,
+                    )
+                    return
+                if not content_sel and not fetch_detail_var.get():
+                    if not messagebox.askyesno(
+                        "본문 선택자 확인",
+                        "본문 선택자가 비어 있고 상세 페이지 본문도 꺼져 있습니다.\n"
+                        "목록 카드 전체가 본문이 될 수 있습니다.\n\n그래도 저장할까요?",
+                        parent=dialog,
+                    ):
+                        return
+                # 문법 사전 검사
+                from websync.config.validator import _css_selector_syntax_error
+
+                for label, sel in (
+                    ("아이템", item_sel),
+                    ("제목", title_sel),
+                    ("링크", link_entry.get().strip() or "a[href]"),
+                    ("본문", content_sel),
+                ):
+                    if not sel:
+                        continue
+                    err = _css_selector_syntax_error(sel)
+                    if err:
+                        messagebox.showerror(
+                            "오류",
+                            f"{label} 선택자: {err}",
+                            parent=dialog,
+                        )
+                        return
+                new_site["item_selector"] = item_sel
+                new_site["title_selector"] = title_sel
+                new_site["link_selector"] = link_entry.get().strip() or "a[href]"
+                new_site["content_selector"] = content_sel
                 new_site["remove_selectors"] = remove_entry.get().strip()
             if idx is None:
                 config["sites"].append(new_site)

@@ -120,3 +120,46 @@ def test_log_validation_warnings_does_not_raise():
     cfg["font_size"] = 999
     # 예외 발생 없이 정상 실행되어야 함
     log_validation_warnings(cfg)
+
+
+def test_validate_site_css_requires_item_selector():
+    site = {
+        "name": "CSS 사이트",
+        "type": "css",
+        "url": "https://example.com/blog",
+        "item_selector": "",
+        "title_selector": "h2",
+        "content_selector": ".body",
+        "limit": 5,
+    }
+    errors = validate_site(site)
+    assert any("item_selector" in e for e in errors)
+
+
+def test_validate_site_css_invalid_selector_syntax():
+    site = {
+        "name": "CSS 사이트",
+        "type": "css",
+        "url": "https://example.com/blog",
+        "item_selector": "[[[",
+        "title_selector": "h2",
+        "content_selector": ".body",
+        "limit": 5,
+    }
+    errors = validate_site(site)
+    assert any("문법" in e for e in errors)
+
+
+def test_validate_site_css_valid_selectors():
+    site = {
+        "name": "CSS 사이트",
+        "type": "css",
+        "url": "https://example.com/blog",
+        "item_selector": "article.post",
+        "title_selector": "h2 a",
+        "link_selector": "h2 a",
+        "content_selector": ".entry-content",
+        "limit": 5,
+    }
+    errors = validate_site(site)
+    assert errors == []

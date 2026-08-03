@@ -114,6 +114,29 @@ KOREAN_SITE_PRESETS: list[SitePreset] = [
         "url": "https://engineering.linecorp.com/ko/feed/",
         "limit": 3,
     },
+    {
+        "label": "뱅크샐러드 블로그 (RSS)",
+        "name": "뱅크샐러드 블로그",
+        "type": "rss",
+        "url": "https://blog.banksalad.com/rss.xml",
+        "limit": 3,
+    },
+    {
+        "label": "네이버 D2 (RSS)",
+        "name": "NAVER D2",
+        "type": "rss",
+        "url": "https://d2.naver.com/d2.atom",
+        "limit": 3,
+        "note": "홈은 SPA — RSS/Atom 권장",
+    },
+    {
+        "label": "CSS 직접설정 (선택자 도우미)",
+        "name": "",
+        "type": "css",
+        "url": "",
+        "limit": 5,
+        "note": "전용 타입·RSS가 없을 때 — 페이지 분석으로 선택자 자동 추천",
+    },
 ]
 
 

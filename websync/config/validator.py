@@ -101,7 +101,43 @@ def validate_site(site: dict) -> list[str]:
     except (ValueError, TypeError):
         errors.append(f"limit: 유효한 정수여야 합니다 (현재: {limit})")
 
+    # CSS 타입: 필수 선택자·문법
+    if site_type == "css":
+        item_sel = (site.get("item_selector") or "").strip()
+        if not item_sel:
+            errors.append("css 타입은 item_selector 가 필요합니다")
+        for key in ("item_selector", "title_selector", "content_selector", "link_selector"):
+            sel = site.get(key)
+            if sel is None or not str(sel).strip():
+                continue
+            err = _css_selector_syntax_error(str(sel).strip())
+            if err:
+                errors.append(f"{key}: {err}")
+        remove = (site.get("remove_selectors") or "").strip()
+        if remove:
+            for part in remove.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                err = _css_selector_syntax_error(part)
+                if err:
+                    errors.append(f"remove_selectors ({part}): {err}")
+                    break
+
     return errors
+
+
+def _css_selector_syntax_error(selector: str) -> str:
+    """soupsieve 문법 검사. 정상이면 빈 문자열."""
+    if not selector or selector in (".", ":scope"):
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+
+        BeautifulSoup("<html><body></body></html>", "html.parser").select(selector)
+    except Exception as e:
+        return f"선택자 문법 오류 ({e})"
+    return ""
 
 
 def log_validation_warnings(config: dict) -> None:

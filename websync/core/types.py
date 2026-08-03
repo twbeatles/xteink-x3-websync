@@ -34,6 +34,7 @@ class SiteConfig(TypedDict, total=False):
     item_selector: str
     title_selector: str
     content_selector: str
+    link_selector: str  # 아이템 내 상세 URL (기본 a[href])
     remove_selectors: str
     limit: int
     enabled: bool

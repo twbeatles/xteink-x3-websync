@@ -52,6 +52,7 @@ a = Analysis(
         # scrapers (13 types + factory/presets)
         'websync.scrapers', 'websync.scrapers.base', 'websync.scrapers.factory',
         'websync.scrapers.types', 'websync.scrapers.presets', 'websync.scrapers.newsletter_base',
+        'websync.scrapers.selector_assistant',
         'websync.scrapers.css', 'websync.scrapers.rss', 'websync.scrapers.velog',
         'websync.scrapers.naver', 'websync.scrapers.naver_common',
         'websync.scrapers.naver_cafe', 'websync.scrapers.naver_post',
@@ -80,6 +81,7 @@ a = Analysis(
         'websync.gui.app', 'websync.gui.tab_sync', 'websync.gui.tab_calibre',
         'websync.gui.tab_history', 'websync.gui.tab_settings', 'websync.gui.tab_device_files',
         'websync.gui.sync_tab', 'websync.gui.sync_tab.tab', 'websync.gui.sync_tab.sites',
+        'websync.gui.sync_tab.selector_wizard',
         'websync.gui.device_files', 'websync.gui.device_files.tab',
         'websync.gui.settings_tab', 'websync.gui.settings_tab.tab',
         'websync.gui.settings_tab.backup_sync',
