@@ -248,3 +248,13 @@ def test_init_db_failure_raises():
     with patch("websync.db.history.sqlite3.connect", side_effect=OSError("permission denied")):
         with pytest.raises(SyncHistoryDbError, match="DB 초기화 실패"):
             SyncHistoryDb(os.path.join(tempfile.gettempdir(), "nonexistent_sub/db.db"))
+
+
+def test_db_wal_mode_enabled():
+    db, path = _make_db()
+    try:
+        with db._connect() as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            assert mode.lower() == "wal"
+    finally:
+        _cleanup_db(db, path)

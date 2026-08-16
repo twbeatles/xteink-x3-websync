@@ -29,6 +29,10 @@ xteink-x3-websync/
 │   │   ├── paths.py           # PROJECT_ROOT (개발: 패키지 상위, frozen: exe 디렉터리)
 │   │   ├── process_lock.py    # 크로스 프로세스 파이프라인 파일 락
 │   │   ├── article.py         # 기사 URL / synthetic key 유틸
+│   │   ├── update_constants.py# 업데이트 URL, Ed25519 공개키 및 제한 상수
+│   │   ├── update_manifest.py # Ed25519 서명 검증 및 릴리즈 매니페스트 파싱
+│   │   ├── update_installer.py# 스트리밍 다운로드, 교체/롤백, 헬퍼 프로세스
+│   │   ├── update_service.py  # 비동기 업데이트 확인/다운로드 조율 서비스
 │   │   └── logger.py          # 날짜별 로그 파일
 │   ├── config/
 │   │   └── manager.py         # config.json CRUD — threading.Lock, deep merge
@@ -93,11 +97,14 @@ xteink-x3-websync/
 ├── sync_history.db            # 전송 이력 DB (gitignore)
 ├── output/                    # 생성 EPUB (gitignore)
 ├── logs/                      # 실행 로그 (gitignore)
-├── tests/                     # pytest
-├── scripts/                   # migrate_to_package.py, verify_migration.py
-├── requirements.txt           # 필수 + pytest
+├── tests/                     # pytest (246 tests)
+├── scripts/                   # migrate, build/verify update manifest & keys
+├── updates/                   # latest.json (Ed25519 서명 릴리즈 매니페스트)
+├── requirements.txt           # 필수 + pytest + cryptography
 ├── requirements-optional.txt  # Pillow, googletrans, youtube, watchdog
-├── .github/workflows/test.yml # CI: pytest
+├── .github/workflows/
+│   ├── test.yml               # CI: pytest
+│   └── release.yml            # 자동 릴리즈 (PyInstaller + Ed25519 서명 배포)
 ├── README.md / CLAUDE.md
 ├── PROJECT_AUDIT.md           # 최신 기능 구현 감사 (루트)
 ├── docs/                      # 사용자·개발 문서

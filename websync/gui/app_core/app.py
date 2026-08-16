@@ -94,7 +94,36 @@ class SyncAppGui(
         self.root.after(0, lambda w=init_w, h=init_h: self._finalize_layout(w, h))
         self.root.after(200, self._maybe_show_portable_wizard)
         self.root.after(400, self._start_backup_pull_if_enabled)
+        self.root.after(1500, self._start_auto_update_check_if_enabled)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _start_auto_update_check_if_enabled(self):
+        """시작 시 백그라운드로 최신 버전 존재 여부를 조용히 확인합니다."""
+        cfg = self.service.config if isinstance(self.service.config, dict) else {}
+        if not cfg.get("auto_check_update", True):
+            return
+
+        def update_task():
+            from websync.core.update_service import UpdateService
+            from websync import __version__
+
+            try:
+                service = UpdateService(current_version=__version__)
+                manifest = service.check_for_update()
+                if manifest:
+                    def notify():
+                        try:
+                            self._log_message(
+                                f"🚀 [업데이트] 새 버전 v{manifest.version}이 출시되었습니다! "
+                                f"(고급 설정 탭 → 소프트웨어 업데이트에서 확인)"
+                            )
+                        except Exception:
+                            pass
+                    self.root.after(0, notify)
+            except Exception:
+                pass
+
+        threading.Thread(target=update_task, daemon=True).start()
 
     def _maybe_show_portable_wizard(self):
         """첫 실행 시 공유 데이터 폴더 연결 마법사."""

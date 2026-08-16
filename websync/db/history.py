@@ -35,12 +35,19 @@ class SyncHistoryDb:
         self._init_db()
 
     def _connect(self):
-        return sqlite3.connect(self.db_path, timeout=10.0)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        return conn
 
     def _init_db(self):
         with self._db_lock:
             try:
                 with self._connect() as conn:
+                    if self.db_path != ":memory:":
+                        try:
+                            conn.execute("PRAGMA journal_mode=WAL")
+                            conn.execute("PRAGMA synchronous=NORMAL")
+                        except sqlite3.Error:
+                            pass
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' AND name='synced_posts'"

@@ -24,6 +24,7 @@ from websync.gui.settings_tab.servers import SettingsServersMixin
 from websync.gui.settings_tab.watch import SettingsWatchMixin
 from websync.gui.settings_tab.ai_translation import SettingsAiTranslationMixin
 from websync.gui.settings_tab.backup_sync import SettingsBackupSyncMixin
+from websync.gui.settings_tab.updater import SettingsUpdaterMixin
 
 
 class SettingsTab(
@@ -32,6 +33,7 @@ class SettingsTab(
     SettingsWatchMixin,
     SettingsAiTranslationMixin,
     SettingsBackupSyncMixin,
+    SettingsUpdaterMixin,
     ctk.CTkFrame,
 ):
     """서버 제어 및 AI, 번역, 합본, 테마 등 고급 설정을 담당하는 탭 패널"""
@@ -235,7 +237,10 @@ class SettingsTab(
         # 7. 클라우드 백업 동기화
         self._build_backup_sync_section(body)
 
-        # 8. 로그 폴더 카드
+        # 8. 소프트웨어 업데이트 카드
+        self._build_updater_card(body)
+
+        # 9. 로그 폴더 카드
         log_card = CardFrame(body, title="📁 실행 로그 파일")
         log_card.pack(fill="x", padx=8, pady=6)
 

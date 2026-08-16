@@ -186,14 +186,113 @@ def release_instance_lock():
         _release_windows_mutex()
 
 
+from websync import __version__
+
+
+def _handle_apply_update(args) -> int:
+    import time
+    import subprocess
+    from websync.core.update_installer import apply_staged_update, write_update_result
+
+    target = args.update_target
+    staged = args.update_staged
+    backup = args.update_backup
+    parent_pid = args.update_parent_pid
+    expected_sha256 = args.update_expected_sha256
+    expected_size = args.update_expected_size
+    result_file = args.update_result_file
+
+    # 부모 프로세스 종료 대기 (최대 15초)
+    if parent_pid and parent_pid > 0:
+        for _ in range(150):
+            if not _is_process_running(parent_pid):
+                break
+            time.sleep(0.1)
+        if _is_process_running(parent_pid):
+            err_msg = f"부모 프로세스(PID: {parent_pid}) 종료 대기 시간(15초) 초과"
+            if result_file:
+                write_update_result(result_file, {"status": "failed", "error": err_msg})
+            return 1
+
+    try:
+        apply_staged_update(
+            target=target,
+            staged=staged,
+            backup=backup,
+            expected_sha256=expected_sha256,
+            expected_size=expected_size,
+        )
+        if result_file:
+            write_update_result(result_file, {"status": "applied", "target": target})
+        # 타겟 프로세스 재기동
+        if os.path.exists(target):
+            subprocess.Popen([target], close_fds=True)
+        return 0
+    except Exception as exc:
+        if result_file:
+            write_update_result(result_file, {"status": "failed", "error": str(exc)})
+        return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="Xteink X3 WebSync CLI / GUI Manager")
     parser.add_argument(
         "--sync",
         action="store_true",
-        help="GUI 없이 config.json 기준 즉시 동기화 (스케줄러 연동용)"
+        help="GUI 없이 config.json 기준 즉시 동기화 (스케줄러 연동용)",
     )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="바이너리 및 핵심 모듈 로드 무결성 스모크 체크 (exit 0)",
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"Xteink X3 WebSync v{__version__}",
+    )
+    parser.add_argument(
+        "--check-update",
+        action="store_true",
+        help="최신 버전 업데이트 존재 여부 확인",
+    )
+    # 업데이터 헬퍼 전용 인자
+    parser.add_argument("--apply-update", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--update-target", help=argparse.SUPPRESS)
+    parser.add_argument("--update-staged", help=argparse.SUPPRESS)
+    parser.add_argument("--update-backup", help=argparse.SUPPRESS)
+    parser.add_argument("--update-parent-pid", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--update-expected-sha256", help=argparse.SUPPRESS)
+    parser.add_argument("--update-expected-size", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--update-result-file", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
+
+    # 1. 스모크 체크
+    if args.smoke:
+        print(f"Xteink X3 WebSync v{__version__} smoke check OK")
+        sys.exit(0)
+
+    # 2. 업데이터 헬퍼 실행
+    if args.apply_update:
+        sys.exit(_handle_apply_update(args))
+
+    # 3. 업데이트 확인 CLI
+    if args.check_update:
+        from websync.core.update_service import UpdateService
+        service = UpdateService()
+        try:
+            manifest = service.check_for_update()
+            if manifest:
+                print(f"[NEW UPDATE] v{manifest.version} 사용 가능 (현재: v{__version__})")
+                print(f"다운로드 URL: {manifest.artifact_url}")
+                sys.exit(0)
+            else:
+                print(f"[UP TO DATE] 현재 버전(v{__version__})이 최신 버전입니다.")
+                sys.exit(0)
+        except Exception as exc:
+            print(f"[ERROR] 업데이트 확인 실패: {exc}")
+            sys.exit(1)
 
     # GUI만 단일 인스턴스 락 — --sync는 프로세스 파일 락(SyncService)으로 직렬화
     gui_lock_acquired = False

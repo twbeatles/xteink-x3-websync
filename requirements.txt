@@ -5,6 +5,7 @@ requests>=2.31.0
 lxml>=5.0.0
 pytest>=8.0.0
 customtkinter>=5.2.0
+cryptography>=42.0.0
 
 
 # 선택 (기능별) — pip install -r requirements-optional.txt

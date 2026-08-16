@@ -142,6 +142,7 @@ class ConfigManager:
             "last_sync_at": "",
             "last_sync_message": "",
         },
+        "auto_check_update": True,
         # RMW 충돌 감지용 (파일에 저장, UI 비노출)
         "_config_revision": 0,
     }

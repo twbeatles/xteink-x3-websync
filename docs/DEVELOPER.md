@@ -183,7 +183,34 @@ EXE는 실행 파일과 같은 폴더에 `config.json`, `sync_history.db`, `logs
 
 ---
 
-## 7. 관련 문서
+## 7. 자동 업데이트 & 릴리즈 워크플로우
+
+### 보안 서명 모델 (Ed25519)
+- **비대칭키 서명**: 빌드된 바이너리(`xteink-x3-websync-vX.Y.Z.exe`)의 SHA-256 해시 및 메타데이터에 대해 Ed25519 개인키로 디지털 서명된 `latest.json` 매니페스트를 생성합니다.
+- **공개키 내장**: `websync/core/update_constants.py`의 `UPDATE_PUBLIC_KEY_B64_DEFAULT`에 공개키가 안전하게 내장되어 있으며, 개인키는 오직 GitHub Actions Secret(`X3_UPDATE_PRIVATE_KEY_B64`)으로만 관리됩니다.
+- **안전 검증 체계**:
+  1. 원격 매니페스트 다운로드 시 CDN 캐시 우회(`Cache-Control: no-cache` + 타임스탬프 파라미터).
+  2. Ed25519 서명, HTTPS URL, SHA-256 해시, 크기 상한(500MB), 만료일 무결성 검증.
+  3. 실시간 스트리밍 해시 검증 및 다운로드 취소(`cancel_event`) 지원.
+  4. 이전 버전 자동 백업(`.bak`) 및 `--smoke` 검증 실패 시 자동 롤백.
+
+### 배포 절차 (GitHub Actions)
+1. `websync/__init__.py`의 `__version__ = "X.Y.Z"` 업데이트 및 커밋.
+2. Git 태그 생성 및 푸시:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+3. GitHub Actions `.github/workflows/release.yml`이 자동으로:
+   - pytest 실행 및 키 검증 (`scripts/verify_update_release_key.py`)
+   - PyInstaller 윈도우 단일 바이너리 빌드 및 `--smoke` 체크
+   - Ed25519 서명 매니페스트 생성 (`scripts/build_update_manifest.py`)
+   - GitHub Release 생성 및 바이너리/매니페스트 업로드
+   - `main` 브랜치의 `updates/latest.json` 자동 갱신 커밋 & 푸시 (`[skip ci]`)
+
+---
+
+## 8. 관련 문서
 
 | 문서 | 용도 |
 |------|------|

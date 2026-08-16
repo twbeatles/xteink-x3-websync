@@ -42,8 +42,11 @@ a = Analysis(
     ],
     hiddenimports=[
         'customtkinter', 'lxml', 'lxml.etree', 'ebooklib', 'bs4', 'requests',
+        'cryptography', 'cryptography.hazmat.primitives.asymmetric.ed25519',
         'websync', 'websync.core', 'websync.core.paths', 'websync.core.logger',
         'websync.core.process_lock', 'websync.core.article', 'websync.core.types',
+        'websync.core.update_constants', 'websync.core.update_manifest',
+        'websync.core.update_installer', 'websync.core.update_service',
         'websync.config', 'websync.config.exceptions', 'websync.config.validator',
         'websync.config.manager', 'websync.config.secrets',
         'websync.db', 'websync.db.history',
