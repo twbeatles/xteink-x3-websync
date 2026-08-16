@@ -1,10 +1,10 @@
 {
   "payload": {
-    "artifact_url": "https://github.com/twbeatles/xteink-x3-websync/releases/download/v1.0.0/xteink-x3-websync-v1.0.0.exe",
-    "expires_at": "2027-08-16T12:00:00Z",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "size": 1,
-    "version": "1.0.0"
+    "artifact_url": "https://github.com/twbeatles/xteink-x3-websync/releases/download/v1.1.0/xteink-x3-websync-v1.1.0.exe",
+    "expires_at": "2027-08-16T14:34:29Z",
+    "sha256": "7c501a0710d4bd22448fc30396853e7cbbb416b57394e65a4b814adb9c799ad3",
+    "size": 25032463,
+    "version": "1.1.0"
   },
-  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  "signature": "9nwX1gImX4I9gpbRcskxzRSdEfrsQ4698wMmAJNh3AuowBaWDtjNIwfCXsUY41+PSNp3hs5vldHxBrjXj4RhAA=="
 }
