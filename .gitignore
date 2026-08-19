@@ -88,6 +88,8 @@ specs/
 .gemini/
 .windsurf/
 .continue/
+.superpowers/
+superpowers/
 
 # Debug one-off scripts (local only; do not commit)
 scripts/_debug_*.py
