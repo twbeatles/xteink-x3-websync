@@ -37,6 +37,20 @@ class BottomBar(ctk.CTkFrame):
         )
         self.sync_now_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
+        self.cancel_sync_btn = ctk.CTkButton(
+            btn_row,
+            text="⏹ 취소",
+            font=get_font(13, "bold"),
+            fg_color=("#dc3545", "#ea868f"),
+            hover_color=("#bb2d3b", "#d16b74"),
+            height=42,
+            width=90,
+            corner_radius=8,
+            state="disabled",
+            command=self.app._request_sync_cancel,
+        )
+        self.cancel_sync_btn.pack(side="left", padx=(0, 6))
+
         self.preview_btn = ctk.CTkButton(
             btn_row,
             text="🔍 뉴스 프리뷰 (선택 동기화)",

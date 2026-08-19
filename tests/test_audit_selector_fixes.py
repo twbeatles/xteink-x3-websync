@@ -138,6 +138,7 @@ def test_spec_hiddenimports_selector_modules():
     text = spec.read_text(encoding="utf-8")
     assert "websync.scrapers.selector_assistant" in text
     assert "websync.gui.sync_tab.selector_wizard" in text
+    assert "websync.gui.settings_tab.updater" in text
 
 
 def test_analyze_html_notes_private_not_forced():

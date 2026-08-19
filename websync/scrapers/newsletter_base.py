@@ -25,7 +25,7 @@
 
 import re
 from abc import abstractmethod
-from urllib.parse import urljoin
+from urllib.parse import urldefrag, urljoin
 
 from bs4 import BeautifulSoup
 
@@ -64,9 +64,9 @@ class BaseNewsletterScraper(BaseScraper):
 
         try:
             if self._is_detail_url(url):
-                content = self._fetch_and_clean_detail(url, site_config)
+                content, page_title = self._fetch_detail_page(url, site_config)
                 if content:
-                    title = self._get_title(url) or "뉴스레터"
+                    title = page_title or "뉴스레터"
                     articles.append({
                         "title": title,
                         "content": content,
@@ -81,11 +81,11 @@ class BaseNewsletterScraper(BaseScraper):
 
                 links = self._extract_links(soup, url)[:limit]
                 for link_url, link_text in links:
-                    content = self._fetch_and_clean_detail(link_url, site_config)
+                    content, page_title = self._fetch_detail_page(link_url, site_config)
                     if not content:
                         skipped += 1
                         continue
-                    title = self._get_title(link_url) or link_text or "뉴스레터"
+                    title = page_title or link_text or "뉴스레터"
                     articles.append({
                         "title": title,
                         "content": content,
@@ -119,7 +119,8 @@ class BaseNewsletterScraper(BaseScraper):
             href = a.get("href", "").strip()
             if not href or not self.LINK_PATTERN.search(href):
                 continue
-            full = urljoin(base_url, href)
+            # #story-1 같은 fragment는 같은 상세 페이지다. 제거 후 중복 판정.
+            full, _frag = urldefrag(urljoin(base_url, href))
             if full in seen:
                 continue
             seen.add(full)
@@ -127,12 +128,27 @@ class BaseNewsletterScraper(BaseScraper):
             results.append((full, title))
         return results
 
+    def _extract_page_title(self, soup: BeautifulSoup) -> str | None:
+        og = soup.select_one('meta[property="og:title"]')
+        if og and og.get("content"):
+            return str(og.get("content")).strip()
+        if soup.title and soup.title.string:
+            return soup.title.string.strip()
+        return None
+
+    def _fetch_detail_page(self, url: str, site_config: dict) -> tuple[str, str]:
+        """상세 페이지를 한 번만 가져와 (본문 HTML, 제목)을 반환."""
+        self._last_detail_title = ""
+        content = self._fetch_and_clean_detail(url, site_config)
+        return content, (getattr(self, "_last_detail_title", None) or "")
+
     def _fetch_and_clean_detail(self, url: str, site_config: dict) -> str:
         """상세 페이지를 가져와 본문을 정제."""
         try:
             resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
+            self._last_detail_title = self._extract_page_title(soup) or ""
 
             container = self._find_content_container(soup)
             if not container:

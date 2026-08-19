@@ -19,6 +19,7 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         pipeline_busy_callback: Optional[Callable[[], bool]],
         get_status_callback: Optional[Callable[[], dict]],
         allow_lan: bool = False,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ):
         self.api_token = api_token or ""
         self.sync_callback = sync_callback
@@ -26,6 +27,7 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         self.pipeline_busy_callback = pipeline_busy_callback
         self.get_status_callback = get_status_callback
         self.allow_lan = allow_lan
+        self.cancel_callback = cancel_callback
         super().__init__(server_address, DashboardHandler)
 
     @property

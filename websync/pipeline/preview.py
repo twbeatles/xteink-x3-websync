@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from websync.scrapers import ScraperFactory
+from websync.scrapers.base import is_allowed_fetch_url
 from websync.upload.uploader import X3Uploader
 from websync.pipeline.article_keys import article_sync_key
 
@@ -61,6 +62,10 @@ def preview_articles(
             name = site.get("name", "무명 사이트")
             scraper_type = site.get("type", "css")
             base_url = site.get("url", "")
+
+            if not is_allowed_fetch_url(base_url):
+                log(f"⚠️ [{name}] URL이 http(s)가 아니어서 건너뜁니다: {(base_url or '')[:80]}")
+                continue
 
             if progress_callback:
                 progress_callback(site_idx, total_sites)

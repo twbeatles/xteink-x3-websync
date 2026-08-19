@@ -145,6 +145,7 @@ class MoneyLetterScraper(BaseNewsletterScraper):
             resp = fetch_url(url, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
+            self._last_detail_title = self._extract_page_title(soup) or ""
 
             container = self._find_content_container(soup)
             if not container:

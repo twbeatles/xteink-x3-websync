@@ -90,6 +90,7 @@ a = Analysis(
         'websync.gui.settings_tab.backup_sync',
         'websync.gui.settings_tab.epub_settings', 'websync.gui.settings_tab.servers',
         'websync.gui.settings_tab.watch', 'websync.gui.settings_tab.ai_translation',
+        'websync.gui.settings_tab.updater',
         'websync.gui.app_core', 'websync.gui.app_core.app',
         'websync.gui.app_core.layout', 'websync.gui.app_core.helpers',
         'websync.gui.app_core.config_sync', 'websync.gui.app_core.sync_control',

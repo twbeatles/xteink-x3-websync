@@ -77,6 +77,10 @@ class SettingsServersMixin:
                     log_callback=self.app._make_log_callback()
                 )
 
+            def cancel_cb():
+                self.service.request_cancel()
+                return True
+
             self.app._web_dashboard = WebDashboard(
                 port=port,
                 bind_host=bind_host,
@@ -86,6 +90,7 @@ class SettingsServersMixin:
                 pipeline_busy_callback=self.service.is_pipeline_running,
                 get_status_callback=self.service.get_last_pipeline_result,
                 allow_lan=self.web_allow_lan_var.get(),
+                cancel_callback=cancel_cb,
             )
             if self.web_allow_lan_var.get():
                 if not messagebox.askyesno(

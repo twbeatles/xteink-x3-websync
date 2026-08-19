@@ -7,6 +7,14 @@ from typing import Callable, Optional
 DEBOUNCE_SECONDS = 2.0
 STABLE_SIZE_CHECKS = 2
 STABLE_CHECK_INTERVAL = 0.5
+WATCH_BOOK_EXTS = (".epub", ".pdf", ".mobi", ".txt", ".azw3")
+
+
+def _is_watch_book_file(path: str) -> bool:
+    if not path or path.endswith(("/", "\\")):
+        return False
+    ext = os.path.splitext(path)[1].lower()
+    return ext in WATCH_BOOK_EXTS
 
 
 class CalibreWatcher:
@@ -85,10 +93,15 @@ class CalibreWatcher:
                 def on_created(self, event):
                     if event.is_directory:
                         return
-                    fpath = event.src_path
-                    ext = os.path.splitext(fpath)[1].lower()
-                    if ext in (".epub", ".pdf", ".mobi", ".txt", ".azw3"):
-                        watcher_self._schedule_debounced(fpath)
+                    if _is_watch_book_file(event.src_path):
+                        watcher_self._schedule_debounced(event.src_path)
+
+                def on_moved(self, event):
+                    if event.is_directory:
+                        return
+                    dest = getattr(event, "dest_path", "") or ""
+                    if _is_watch_book_file(dest):
+                        watcher_self._schedule_debounced(dest)
 
             self._observer = Observer()
             self._observer.schedule(_Handler(), self.watch_dir, recursive=True)

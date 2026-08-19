@@ -1,223 +1,363 @@
 # Project Audit
 
-> **감사 일자**: 2026-08-16  
-> **감사 대상**: GitHub Releases 기반 Ed25519 자동 업데이트 시스템 추가 이후 **전체 프로젝트 기능 구현 안정성, 보안, 동시성, 데이터 무결성 및 아키텍처 감사**  
-> **분석 도구**: `README.md` / `CLAUDE.md` 정밀 분석 + **CodeGraph MCP** (호출 그래프, blast radius, 심볼 영향도 분석) + pytest (250개 테스트 100% 통과)  
-> **개선 반영 완료**: 도출된 모든 1~3단계 개선 과제(CDN 캐시 방어, 헬퍼 타임아웃, SQLite WAL 모드, 자동 확인 옵션, 릴리즈 노트 링크, 다운로드 취소 기능 등) 코드 및 테스트 반영 완료.
+> **감사 일자**: 2026-08-19  
+> **감사 관점**: 기능 구현 안정성 (예외·검증·상태/데이터 흐름·동시성·경로/인코딩/OS·DB/설정·보안·테스트·문서-구현 정합성)  
+> **분석 방법**: `README.md` / `CLAUDE.md` / `docs/DEVELOPER.md` 정독 → **CodeGraph MCP**로 엔트리포인트·호출 그래프·blast radius 분석 → 필요 구간에만 소스 대조 및 `pytest --collect-only` (253 collected)  
+> **범위 밖 (초안)**: 코드 수정 없음. 스타일·네이밍 지적은 제외. 추정은 명시.  
+> **개선 반영 (2026-08-19)**: 아래 권장 1~3단계(H1–H10, 취소 API, Watch `on_moved`, YouTube 1.x 호환, 문서 정합)를 코드·테스트에 반영함.
 
 ---
 
 ## 1. Executive Summary
 
-**Xteink X3 WebSync Manager**는 e-ink 단말기(Xteink X3)를 위한 콘텐츠 수집(13종 스크래퍼), EPUB 빌드, 무선 업로드, 기기 파일 관리, Calibre 연동 및 이번에 새로 구축된 **Ed25519 디지털 서명 기반 자동 업데이트 엔진**을 포괄하는 완성도 높은 데스크톱 애플리케이션입니다.
+Xteink X3 WebSync는 CrossPoint 펌웨어 X3 e-ink 기기를 위한 **수집 → EPUB → 무선 전송** 데스크톱 앱이다. 파이프라인 파사드(`SyncService`), 설정 CAS(`ConfigManager`), 기기별 이력(`SyncHistoryDb`), Ed25519 업데이터, OPDS/웹 대시보드가 역할별로 분리되어 있고, GUI/`--sync` 간 `ProcessFileLock` 직렬화도 실제 코드에 존재한다.
 
-전체적인 아키텍처는 SOLID 원칙(SRP/DIP)에 입각하여 파사드(`SyncService`), 설정 관리자(`ConfigManager`), DB 캐시(`SyncHistoryDb`), 업데이터 엔진(`UpdateService`) 등으로 명확히 분리되어 있으며, 다중 인스턴스 방어(Windows Named Mutex + 파일 락) 및 프로세스 간 직렬화(`ProcessFileLock`)가 잘 설계되어 있습니다.
+이전 루트 `PROJECT_AUDIT.md`(2026-08-16)는 업데이터 중심이었고 “전체 위험도 Very Low, 개선 과제 전부 반영”으로 닫혀 있었다. 이번 감사는 **기능 구현 전반**을 다시 봤고, 즉시 장애를 내는 Critical 원격 취약점은 없었다. 당시 High 항목(번역 스위치, Watch Tk 스레드, `--smoke` 스텁)과 권장 1~3단계는 **2026-08-19에 코드·테스트·문서에 반영**했다.
 
-### 핵심 요약 및 전체 위험도
+| 영역 | 평가 | 요약 |
+|------|------|------|
+| 핵심 파이프라인 (수집·중복제거·업로드·이력) | 양호 | 락·부분 전송·DB 오류 중단·기기 0대 거부가 구현되어 있음 |
+| 설정/DB 무결성 | 양호 | 원자적 저장, revision CAS, SQLite WAL, 레거시 `*` 이관 |
+| 업데이터 보안 | 양호 | Ed25519 + SHA-256 + HTTPS 강제 + 롤백. `--smoke`는 핵심 모듈 import 검증 |
+| OPDS/대시보드 인증 | 양호 (전제 있음) | LAN 시 키 필수, Bearer 비교는 `compare_digest`. LAN HTTP 평문은 문서화된 전제 |
+| GUI 비동기 | 양호 | Watch 감지 로그는 `root.after`, `_log_message`에 `TclError` 가드 |
+| 스크래퍼 입력 검증 | 양호 | `fetch_url` http(s)+16MB, 파이프라인은 잘못된 스킴 스킵 |
+| 문서 정합성 | 양호 | CustomTkinter·취소·스모크·락 경로를 USER_GUIDE/DEVELOPER/CLAUDE에 반영 |
+| **전체 위험도 (반영 후)** | **Low** | High 항목과 권장 1~3단계 반영. 잔여는 §4 추정(G1~G6) 수준 |
 
-| 위험 영역 | 평가 | 요약 |
-|---|---|---|
-| **업데이터 엔진 보안 & 무결성** | **Very Low** | Ed25519 비대칭키 서명, SHA-256 스트리밍 해시 검증, HTTPS 강제, 스모크 테스트 실패 시 자동 롤백 등 방어 체계가 매우 견고함. |
-| **GUI 비동기 스레드 안전성** | **Low ~ Medium** | 다이얼로그 파괴 시 TclError 방어 가드가 전반적으로 구현되어 있으나, 신규 Updater UI 콜백 및 다운로드 취소 처리에서 추가 방어가 권장됨. |
-| **동시성 및 데이터베이스** | **Low** | SQLite 단일 연결에 스레드 락이 걸려 있으나, WAL 저널 모드 미적용으로 인한 디스크 I/O 병목 가능성 잔존. |
-| **CDN 캐시 및 네트워크 지연** | **Low ~ Medium** | GitHub Raw 매니페스트 요청 시 CDN 캐싱으로 인해 릴리즈 직후 최대 5분간 최신 버전 조회가 지연될 수 있음. |
-| **전체 프로젝트 위험도** | **LOW (매우 안정적)** | 시스템 전반의 핵심 파이프라인과 신규 업데이트 파이프라인이 안정적으로 동작하며, 즉각적인 서비스 중단을 유발하는 Critical 이슈는 없음. |
+**반영 완료 (2026-08-19)**
+
+1. `Translator.is_available_for_site`가 전역 `enabled`를 먼저 본다  
+2. Calibre Watch 감지 로그는 Tk 메인 스레드(`root.after`)로 전달  
+3. `--smoke`가 `SMOKE_MODULES`를 실제로 import 하고 실패 시 종료 코드 1
 
 ---
 
 ## 2. Project Understanding
 
-### 2.1 프로젝트 목적 및 핵심 가치
-- **타겟 디바이스**: CrossPoint 펌웨어 기반 Xteink X3 e-ink 전자책 리더기.
-- **주요 기능**:
-  1. 웹/블로그/뉴스레터/RSS 등 13종 콘텐츠 자동 수집 및 정제.
-  2. e-ink 최적화 단일/일간 합본 EPUB 빌드.
-  3. 기기별 SQLite 전송 이력 관리로 중복 전송 방지 (증분 동기화).
-  4. CrossPoint REST API 기반 무선 업로드 및 기기 파일 관리.
-  5. Calibre 서재 무선 전송, OPDS 카탈로그 서버, 웹 대시보드.
-  6. **(신규)** Ed25519 디지털 서명 검증 기반 GitHub Releases 자동 업데이트.
+### 2.1 목적 (README / CLAUDE.md)
 
-### 2.2 주요 실행 흐름 및 아키텍처 (CodeGraph 분석 기반)
+- 지정 뉴스·블로그·뉴스레터(13종 스크래퍼)를 모아 e-ink용 EPUB으로 빌드하고 X3에 무선 전송  
+- SQLite로 기기별 중복 제거 (증분 동기화)  
+- Calibre 서재·기기 파일·스케줄·공유 데이터 폴더·OPDS/웹 대시보드·Ed25519 자동 업데이트
+
+개발 원칙: SOLID, 모듈 단일 책임, 타입 힌트.
+
+### 2.2 실행 흐름 (CodeGraph + 진입점)
 
 ```
-[진입점: x3_websync.py]
-  │
-  ├── [--smoke] ──► 모듈 로드 무결성 검증 후 exit(0)
-  ├── [--version] ──► 현재 버전 출력 후 exit(0)
-  ├── [--check-update] ──► UpdateService.check_for_update() (CLI 모드)
-  ├── [--apply-update] ──► _handle_apply_update() (분리된 헬퍼 프로세스: 교체/롤백/재기동)
-  ├── [--sync] ──► SyncService.run_sync_pipeline() (ProcessFileLock 직렬화 백그라운드)
-  └── [GUI 모드] ──► Windows Named Mutex 락 획득 ──► SyncAppGui.run()
-                         │
-                         ├── [뉴스 동기화 탭] ──► SelectorWizardPanel, SyncControl
-                         ├── [Calibre 서재 탭] ──► CalibreHandler
-                         ├── [동기화 이력 탭] ──► SyncHistoryDb View
-                         ├── [기기 파일 탭] ──► DeviceClient (/api/files, /delete)
-                         └── [고급 설정 탭] ──► SettingsTab
-                                                  ├─ OPDS / WebDashboard / Calibre Watch
-                                                  ├─ AI 요약 / 번역 / 공유 데이터 폴더
-                                                  └─ [소프트웨어 업데이트] ──► SettingsUpdaterMixin
-                                                                                  └─ UpdateService
+x3_websync.main()
+  ├── --smoke          → run_smoke_check() (핵심 모듈 import, 실패 시 1)
+  ├── --version        → 패키지 버전
+  ├── --check-update   → UpdateService.check_for_update()
+  ├── --apply-update   → apply_staged_update (헬퍼 프로세스, 서명/해시 재검증)
+  ├── --sync           → GUI 락 없이 SyncService.run_sync_pipeline()
+  └── [GUI]            → acquire_instance_lock() → SyncAppGui.run()
+                           │
+                           └─ SyncService (blast radius: GUI/대시보드/테스트 등 27+ 호출)
+                                ├─ maybe_backup_pull → run_sync_pipeline_locked → maybe_backup_push
+                                ├─ preview_articles / sync_selected_articles  (동일 파이프라인 락)
+                                └─ begin_sync_pipeline_async  (대시보드 POST /api/sync → 202/409)
 ```
 
-### 2.3 핵심 모듈 역할 매트릭스
+파이프라인 본문 (`websync/pipeline/sync_pipeline.py`):
 
-| 모듈 | 역할 | 호출 관계 및 Blast Radius (CodeGraph) |
-|---|---|---|
-| `websync.core.update_manifest` | Ed25519 서명 검증, 버전 비교, HTTPS/SHA256/크기/만료일 무결성 검증 | `UpdateService`, `verify_update_release_key.py`, `build_update_manifest.py`에서 직접 의존. |
-| `websync.core.update_installer` | 스트리밍 다운로드, 교체/롤백(`apply_staged_update`), 헬퍼 프로세스 실행 | `UpdateService`, `x3_websync._handle_apply_update`에서 의존. |
-| `websync.core.update_service` | 비동기 업데이트 확인/다운로드/설치 조율 파사드 | `SettingsUpdaterMixin`, `x3_websync.main`에서 의존. |
-| `websync.pipeline.service` | 동기화 파이프라인 총괄 오케스트레이터 | GUI 및 CLI의 메인 허브 (27개 호출 심볼). |
-| `websync.config.manager` | `config.json` 스키마 v3 관리, CAS 리비전 충돌 방지, 원자적 저장 | 전 패키지 공유 (27개 호출 심볼). |
-| `websync.db.history` | SQLite 기기별(`device_ip`) 전송 이력 캐시 | 파이프라인 중복 방지 및 백업 서비스와 연동. |
+1. config 리로드 → 활성 사이트 / 전송 기기 확인 (`no_sites` / `no_targets`)  
+2. 레거시 `device_ip='*'` → 첫 대상 이력 키로 이관  
+3. 사이트별 `ScraperFactory.get_scraper(type).fetch_articles`  
+4. `article_sync_key` → `needs_sync(..., history_mode, key_aliases)`  
+5. (선택) 번역 / AI 요약  
+6. `per_site` 또는 `daily_digest` EPUB → `upload_to_targets(only_ips=pending)`  
+7. 성공 IP만 `mark_synced_many`  
+8. `_last_pipeline_result` + 토스트
+
+### 2.3 핵심 모듈과 영향 범위 (CodeGraph)
+
+| 심볼 | 역할 | Blast radius |
+|------|------|----------------|
+| `SyncService` (`pipeline/service.py`) | 락·백업 훅·파이프라인 파사드 | GUI `app_core`, 대시보드, 테스트 4종 이상 |
+| `run_sync_pipeline_locked` | 실제 수집·빌드·전송 | `SyncService`만 호출 |
+| `ConfigManager.update_config` | RMW + revision bump | backup pull/push, local_import |
+| `SyncHistoryDb.needs_sync` / `mark_synced` | 기기별 중복 제거 | preview, sync_pipeline, backup |
+| `X3Uploader.upload_to_targets` | 병렬 HTTP 업로드 (최대 4워커) | 파이프라인, Calibre 탭, Watch, 직접 업로드 |
+| `ProcessFileLock` | 프로세스 간 파이프라인 직렬화 | temp 디렉터리의 고정 파일명 |
+
+### 2.4 문서와 코드가 일치하는 부분
+
+- GUI 락과 `--sync` 프로세스 락 분리 (`x3_websync.py`, `SyncService._try_acquire_pipeline_locks`)  
+- 웹 대시보드 `begin_sync_pipeline_async` 계약 (202 수락 / 409 거부)  
+- OPDS `normcase` + `realpath`로 경로 탈출 차단  
+- 설정 결손 키 보강, `portable_data` ↔ `backup_sync` 미러  
+- 스크래퍼 타입 SSOT는 `websync/scrapers/types.py`의 `SCRAPER_TYPES` (13종)
 
 ---
 
 ## 3. High-Risk Issues
 
-실제 코드 분석을 통해 발견된 구체적 문제점과 개선 방향입니다.
+각 항목은 현재 소스에 근거가 있다. 추정은 §4로 분리했다.
+
+### H1. 번역 전역 스위치가 googletrans에서 무시됨
+
+* 위치: `websync/pipeline/translator.py` — `Translator.is_available_for_site`  
+* 문제: `provider == "googletrans"`이면 `self.enabled`를 보지 않고 패키지 로드 가능 여부만 본다. 기본 provider는 `"googletrans"`이고 기본 `enabled`는 `False`다. 파이프라인은 `is_available()`가 아니라 `is_available_for_site()`만 호출한다 (`sync_pipeline.py` 145행, `selected_sync.py` 83행).  
+* 영향: 사이트에 `translate_to`만 켜져 있고 고급 설정의 번역이 꺼져 있어도, `googletrans`가 설치되어 있으면 본문이 외부 번역 API로 나간다. README는 “AI 요약·번역을 켜면 외부 전송”이라고 했는데, **끈 상태에서도 전송**될 수 있다.  
+* 근거:
+
+```27:35:websync/pipeline/translator.py
+    def is_available_for_site(self, translate_to: str) -> bool:
+        if not (translate_to or "").strip():
+            return False
+        if self.provider == "libretranslate":
+            return self.enabled
+        if self.provider == "googletrans":
+            return self._get_gtrans() is not None
+        return self.enabled
+```
+
+`libretranslate`만 `enabled`를 본다. 기존 `tests/test_translator.py`는 `enabled=False` + googletrans 조합을 검증하지 않는다.  
+* 권장 수정 방향: 모든 provider에서 `self.enabled`를 먼저 검사. 사이트 `translate_to`는 그 다음 조건.  
+* 우선순위: **High**
 
 ---
 
-### [이슈 1] GitHub Raw URL 매니페스트 조회 시 CDN 캐싱으로 인한 최신 버전 인지 지연
+### H2. Calibre Watch가 Tk 메인 스레드 밖에서 위젯을 건드림
 
-* **위치**: `websync/core/update_manifest.py` (`download_release_manifest`)
-* **문제**:
-  `UPDATE_MANIFEST_URL`은 `raw.githubusercontent.com`을 가리키고 있습니다. GitHub Raw 도메인은 자체 캐싱 레이어(약 300초 / 5분 TTL)를 가지고 있어, GitHub Actions가 `main` 브랜치에 `updates/latest.json`을 새로 푸시한 직후 사용자가 "최신 버전 확인"을 누르면 이전 캐시 응답이 반환되어 최신 버전을 즉시 감지하지 못할 수 있습니다.
-* **영향**:
-  신규 릴리즈 배포 직후 최대 5분간 클라이언트에서 "현재 최신 버전을 사용 중입니다"라는 오탐이 발생할 수 있습니다.
-* **근거**:
-  `download_release_manifest`에서 `Request(str(url), headers={"User-Agent": "..."})` 형태로 요청하며, `Cache-Control` 헤더나 캐시 버스팅 파라미터가 포함되지 않음.
-* **권장 수정 방향**:
-  `download_release_manifest` 요청 헤더에 `{"Cache-Control": "no-cache", "Pragma": "no-cache"}`를 추가하고, URL에 타임스탬프 쿼리 파라미터(`f"{url}?_t={int(time.time())}"`)를 덧붙여 CDN 캐시를 안전하게 우회하도록 개선.
-* **우선순위**: **Medium**
+* 위치: `websync/gui/settings_tab/watch.py` — `on_new_file`; `websync/watch/calibre.py` — `_flush_pending`  
+* 문제: Watchdog/`threading.Timer`에서 `on_new_file`이 호출되고, 그 안에서 `self.app._log_message(...)`를 직접 호출한다. `_log_message`는 `bottom_bar.log_txt`에 insert한다. 업로드 워커는 `root.after(0, ...)`를 쓰지만, **감지 로그는 after가 없다**.  
+* 영향: 감시 중 로그 갱신 시 `RuntimeError: main thread is not in main loop` 또는 Tcl 크래시. 감시는 켜져 있는데 UI만 죽는 형태가 될 수 있다.  
+* 근거:
 
----
+```56:58:websync/gui/settings_tab/watch.py
+            def on_new_file(fpath: str):
+                self.app._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 전송 큐 대기 중")
+                watch_queue.put(fpath)
+```
 
-### [이슈 2] 개발 환경(Non-frozen)에서 업데이트 적용 승인 시 무반응 현상
+```47:68:websync/gui/app_core/helpers.py
+    def _log_message(self, message: str):
+        self.bottom_bar.log_txt.configure(state="normal")
+        self.bottom_bar.log_txt.insert(tk.END, message + "\n")
+        ...
+```
 
-* **위치**: `websync/core/update_service.py` (`launch_update_and_exit`)
-* **문제**:
-  `launch_update_and_exit` 함수에서 `getattr(sys, "frozen", False)`가 `False`인 경우(즉, `.py` 소스로 실행 중인 개발 환경), 아무런 에러 없이 로깅만 남기고 함수가 종료됩니다. 이로 인해 GUI에서 "프로그램을 재시작하여 업데이트를 적용하시겠습니까?" 팝업에서 [예]를 눌러도 프로그램이 종료되거나 재시작되지 않고 아무 반응이 없는 상태로 남습니다.
-* **영향**:
-  소스 코드로 직접 구동하여 테스트하는 개발자 또는 파이썬 사용자에게 혼선을 줄 수 있습니다.
-* **근거**:
-  ```python
-  if getattr(sys, "frozen", False):
-      launch_update_helper(...)
-      sys.exit(0)
-  else:
-      # 개발 환경에서는 직접 교체 대신 알림
-      self.logger.info(f"개발 환경(non-frozen)에서는 자동 교체를 생략합니다: {staged_path}")
-  ```
-* **권장 수정 방향**:
-  `launch_update_and_exit`에서 non-frozen 환경일 경우 `RuntimeError("개발 모드(소스 실행)에서는 자동 교체를 지원하지 않습니다.")` 예외를 발생시키거나, GUI에서 "개발 환경에서는 다운로드된 파일 경로만 보존되며 바이너리 자동 교체는 지원되지 않습니다"라는 안내 팝업을 명시적으로 표시하도록 분기 처리.
-* **우선순위**: **Low**
+선택자 마법사(`selector_wizard.py`)는 `TclError`/`winfo_exists`를 쓰는데 Watch는 그렇지 않다.  
+* 권장 수정 방향: `on_new_file`도 `root.after(0, ...)`로 로그. `_log_message` 진입부에 `winfo_exists` + `TclError` 가드.  
+* 우선순위: **High**
 
 ---
 
-### [이슈 3] 업데이터 헬퍼 프로세스의 부모 프로세스 종료 대기 타임아웃 처리
+### H3. `--smoke`가 문서·업데이터 계약과 다름
 
-* **위치**: `x3_websync.py` (`_handle_apply_update`)
-* **문제**:
-  부모 프로세스가 종료되기를 기다리는 루프가 15초(150회 × 0.1초) 동안 실행됩니다. 만약 부모 프로세스가 15초 후에도 모종의 이유(예: 락 해제 지연, 서브스레드 블로킹)로 종료되지 않은 경우, 루프를 빠져나와 즉시 `apply_staged_update`를 시도합니다. 이때 대상 실행파일이 여전히 부모 프로세스에 의해 잠겨 있으면 `PermissionError`가 발생하고 업데이트가 롤백/실패합니다.
-* **영향**:
-  종료가 지연되는 특수 상황에서 업데이트 교체가 실패할 가능성이 있습니다.
-* **근거**:
-  ```python
-  if parent_pid and parent_pid > 0:
-      for _ in range(150):
-          if not _is_process_running(parent_pid):
-              break
-          time.sleep(0.1)
-  # 15초 경과 후 _is_process_running(parent_pid) 검사 없이 바로 apply_staged_update 실행
-  ```
-* **권장 수정 방향**:
-  15초 경과 후에도 `_is_process_running(parent_pid)`가 `True`이면, `write_update_result(result_file, {"status": "failed", "error": "부모 프로세스 종료 대기 시간 초과"})`를 기록하고 명시적으로 에러 종료(`return 1`)하도록 방어 로직 추가.
-* **우선순위**: **Low**
+* 위치: `x3_websync.py` — `main()` smoke 분기; `websync/core/update_installer.py` — `apply_staged_update`  
+* 문제: CLI 도움말과 설치기는 “바이너리 및 핵심 모듈 로드 무결성 스모크”라고 한다. 구현은 버전 문자열을 찍고 `exit(0)`만 한다.  
+* 영향: PyInstaller 교체 후 `--smoke`가 0을 반환해도 **번들 누락·import 실패를 검출하지 못한다**. import는 파일 최상단에서 이미 일어나므로, 완전히 기동 불가한 exe는 걸러지지만 “기동만 되고 핵심 모듈이 빠진” 빌드는 통과한다. 롤백 트리거가 약해진다.  
+* 근거:
+
+```271:274:x3_websync.py
+    if args.smoke:
+        print(f"Xteink X3 WebSync v{__version__} smoke check OK")
+        sys.exit(0)
+```
+
+`tests/test_updater_cli.py`도 stdout에 `"smoke check OK"`가 있는지만 본다.  
+* 권장 수정 방향: smoke 경로에서 `ConfigManager`, `SyncService`, `ScraperFactory`, `EpubBuilder` 등 핵심 import/인스턴스를 실제로 수행하고 실패 시 non-zero. GUI(`SyncAppGui`)는 디스플레이 없는 헬퍼에서 깨질 수 있으니 제외하거나 지연 import.  
+* 우선순위: **High** (업데이트 안전망)
 
 ---
 
-### [이슈 4] SQLite 데이터베이스 WAL 저널 모드 미적용
+### H4. 사이트 URL 검증이 파이프라인을 막지 않음
 
-* **위치**: `websync/db/history.py` (`SyncHistoryDb._connect`)
-* **문제**:
-  SQLite 연결 시 기본 저널 모드(DELETE/ROLLBACK)를 사용하고 있습니다. 파이프라인 동기화, UI 이력 조회, 공유 폴더 백업 동기화(`BackupSyncService`) 등이 동시에 일어날 때 파일 레벨 락 경합으로 인한 지연이 발생할 수 있습니다.
-* **영향**:
-  동기화 기사 수가 수천 건 이상으로 많아질 때 간헐적 DB 잠금 지연(`busy timeout`) 발생 가능성.
-* **근거**:
-  `_connect` 메서드에서 `sqlite3.connect(self.db_path, timeout=10.0)`만 호출하고 `conn.execute("PRAGMA journal_mode=WAL")`를 수행하지 않음.
-* **권장 수정 방향**:
-  `_init_db()` 시점에 `PRAGMA journal_mode=WAL` 및 `PRAGMA synchronous=NORMAL`을 적용하여 동시 읽기/쓰기 성능과 안전성을 향상.
-* **우선순위**: **Low**
+* 위치: `websync/config/validator.py` — `validate_site`, `log_validation_warnings`; `websync/scrapers/base.py` — `fetch_url`; `websync/pipeline/sync_pipeline.py`  
+* 문제: URL은 `http://`/`https://`가 아니면 경고만 남긴다. `fetch_url`은 스킴·본문 크기·리다이렉트 대상을 제한하지 않는다. 선택자 도우미만 `is_private_or_local_url`로 사설망을 경고한다.  
+* 영향: 잘못된 스킴·거대 응답·의도치 않은 내부 호스트 요청이 동기화 때 그대로 실행된다. 공유 폴더 `sites.json`이 병합되면(§4 G3) 다른 PC에서도 같은 URL을 친다.  
+* 근거: `log_validation_warnings`는 “로드는 중단하지 않음”이 명시되어 있다. `fetch_url`은 `_session.get(url, ...)`만 수행. 파이프라인은 `validate_config` 결과를 보지 않는다.  
+* 권장 수정 방향: 동기화 시작 시 활성 사이트 URL을 http(s)만 허용하고 실패 사이트는 스킵/집계. `fetch_url`에 최대 본문 크기(예: 8–16MB)와 리다이렉트 횟수 상한.  
+* 우선순위: **Medium**
+
+---
+
+### H5. Calibre Watch가 `on_created`만 구독
+
+* 위치: `websync/watch/calibre.py` — `_Handler.on_created`  
+* 문제: `on_moved` / `on_modified`가 없다. Calibre와 많은 Windows 프로그램은 temp에 쓴 뒤 rename/move 한다.  
+* 영향: “새 책 추가 시 자동 전송”이 조용히 안 되거나, 불완전 파일을 안정성 검사에서 스킵한다. 사용자는 감시가 켜져 있는데 전송이 없다고 느낀다.  
+* 근거: 핸들러에 `on_created`만 정의. 안정성 검사(`_is_file_stable`)는 created 경로에만 적용.  
+* 권장 수정 방향: `on_moved`의 dest 경로도 같은 확장자 필터 + debounce. dest가 감시 폴더 밖이면 무시.  
+* 우선순위: **Medium**
+
+---
+
+### H6. 공유 폴더 락 실패 시 pull/push를 건너뛰고 동기화를 계속함
+
+* 위치: `websync/backup/service.py` — `_acquire_folder_lock`, `_pull_unlocked`  
+* 문제: 폴더 락은 **비차단**이다. 다른 PC/프로세스가 잡고 있으면 `skipped=True`만 하고 `SyncService._run_pipeline_body`는 로컬 캐시로 수집·이력을 기록한다.  
+* 영향: OneDrive 양방향 사용 시 한쪽이 낡은 `sites.json`/`synced_posts.json` 기준으로 돌아가 중복 전송 또는 신규 누락이 난다. 락은 “정본 일치”를 보장하지 못하고 **최선 노력**이다.  
+* 근거: `_acquire_folder_lock`이 `acquire(blocking=False)` 실패 시 즉시 return. `maybe_backup_pull`은 skipped여도 예외를 내지 않는다.  
+* 권장 수정 방향: 짧은 재시도(예: 2초×5) 후 실패하면 로그를 에러 수준으로 올리고, 옵션으로 “정본 없으면 동기화 중단”.  
+* 우선순위: **Medium**
+
+---
+
+### H7. EPUB 본문 정제가 `script`/`style`만 제거
+
+* 위치: `websync/epub/sanitize.py` — `sanitize_body_html`  
+* 문제: `iframe`, `object`, `embed`, `form`, `on*` 이벤트, `javascript:` 링크는 남는다.  
+* 영향: 일부 리더/미리보기에서 스크립트성 마크업이 남거나, 이미지 포함 시 외부 리소스를 당긴다. e-ink CrossPoint에서는 위험이 낮지만 EPUB 산출물의 안전 계약은 약하다.  
+* 근거: `find_all(["script", "style"])`만 decompose.  
+* 권장 수정 방향: 위험 태그 화이트리스트(또는 블랙리스트 확장) + `onclick` 등 속성 제거.  
+* 우선순위: **Low** (리더 크래시가 재현되면 Medium)
+
+---
+
+### H8. 뉴스레터 상세를 글마다 두 번 받음
+
+* 위치: `websync/scrapers/newsletter_base.py` — `fetch_articles`, `_fetch_and_clean_detail`, `_get_title`  
+* 문제: 본문용 GET 후 제목용으로 같은 URL을 다시 GET한다.  
+* 영향: soonsal/moneyletter에서 글 수 × 2의 요청. 상대 서버 부하·타임아웃·부분 실패 증가. (같은 호의 `#story-N` 중복은 `urldefrag`로 최근 수정됨.)  
+* 근거: `_fetch_and_clean_detail`과 `_get_title`이 각각 `fetch_url`을 호출.  
+* 권장 수정 방향: 상세 응답 soup에서 `<title>`/`og:title`을 같이 추출.  
+* 우선순위: **Low**
+
+---
+
+### H9. GUI 업로더가 `primary_device_id`를 넘기지 않음
+
+* 위치: `websync/gui/app_core/helpers.py` — `_make_uploader`; 비교: `SyncService._apply_config_to_components`  
+* 문제: 파이프라인 업로더는 `primary_device_id`를 넣어 `history_key`를 안정 id로 잡는다. GUI Watch/직접 업로드/Calibre 전송은 id 없이 IP만 쓴다.  
+* 영향: Watch/Calibre 전송은 이력 DB에 안 남기므로 중복 키 문제는 당장 없다. 나중에 같은 업로더로 이력을 남기면 IP 변경 시 키가 갈라진다.  
+* 근거: `_make_uploader` 생성자에 `primary_device_id` 인자 없음.  
+* 권장 수정 방향: `_make_uploader`에 `primary_device_id=config.get("x3_primary_device_id")` 전달.  
+* 우선순위: **Low**
+
+---
+
+### H10. 문서와 구현 불일치 (기능 오해로 이어지는 것)
+
+* 위치: `CLAUDE.md`, `docs/DEVELOPER.md`, `README.md` vs 코드  
+* 문제:
+
+| 문서 | 코드 |
+|------|------|
+| CLAUDE.md GUI = `tkinter`+`ttk`, Clean Light 고정 | `websync/gui/widgets.py`는 **CustomTkinter**, System/Dark/Light |
+| CLAUDE.md 테스트 246개 / DEVELOPER.md 196개(2026-07-27) | `pytest --collect-only` **253** |
+| CLAUDE.md §5 로드맵 HIGH/MEDIUM이 “할 일”처럼 보임 | 로그·이력 탭·전용 스크래퍼·OPDS 등은 이미 구현. 문서 스스로도 “대부분 완료”라고 적어 두었으나 본문은 옛 할 일 목록 |
+| `--smoke` = 모듈 로드 무결성 | 버전 출력만 |
+| README 필수 패키지 설명에 CustomTkinter 미기재 | `requirements.txt`에 `customtkinter>=5.2.0` 필수 |
+
+* 영향: 신규 기여자가 잘못된 스택/테스트 수/스모크 의미를 기준으로 작업한다.  
+* 근거: 위 파일 대조 + collect-only 253.  
+* 권장 수정 방향: CLAUDE/DEVELOPER의 테스트 수·GUI 스택·로드맵을 “현재 구현 / 남은 아이디어”로 분리.  
+* 우선순위: **Medium** (동작 버그는 아니나 감사 범위에 포함)
+
+---
+
+### 잘 되어 있어 이번 목록에 넣지 않은 것
+
+- `ConfigManager` 원자적 쓰기(`tmp`+`fsync`+`replace`)와 `_config_revision` CAS  
+- `SyncHistoryDb` WAL + 스레드 락 + 레거시 스키마 이관  
+- OPDS 다운로드 경로 `realpath`/`normcase`  
+- 대시보드 Bearer/`compare_digest`, 세션 HMAC, `/api/sync` 409  
+- 업데이터 HTTPS·서명·크기·만료·취소 이벤트  
+- 업로드 파일명 한글 → short hash (CrossPoint 크래시 회피)  
+- 스케줄러 hour/minute 정수 검증, `shell=False`
 
 ---
 
 ## 4. Potential Functional Gaps
 
-확실하지 않거나 향후 편의성을 위해 보완을 고려할 수 있는 항목들입니다.
+확실하지 않은 항목은 **추정**으로 표시한다.
 
-1. **[추정] 앱 시작 시 백그라운드 자동 업데이트 확인 옵션**
-   - 현재는 사용자가 설정 탭에 들어가서 "최신 버전 확인" 버튼을 수동으로 눌러야만 확인이 가능합니다.
-   - 설정(`config.json`)에 `auto_check_update: true` 옵션을 두고, GUI 기동 시 백그라운드로 조용히 확인하여 새 버전이 있을 때만 하단 상태 바나 알림 뱃지를 띄우는 UX가 추가되면 편의성이 크게 향상될 수 있습니다.
+### 구현은 있으나 구멍이 보이는 보완점
 
-2. **[추정] 릴리즈 변경사항(Release Notes / Changelog) 안내 다이얼로그**
-   - 현재는 새 버전 감지 시 버전 번호와 파일 크기만 표시하고 바로 다운로드 여부를 묻습니다.
-   - `latest.json` 매니페스트 페이로드에 `release_notes` 또는 `html_url` 필드를 추가하거나, 팝업에서 "GitHub 릴리즈 페이지 보기" 링크를 제공하면 사용자가 어떤 점이 개선되었는지 확인 후 업데이트를 결정할 수 있습니다.
+| 항목 | 설명 | 구분 |
+|------|------|------|
+| 동기화 중 취소 | 파이프라인 락은 있으나 사용자 취소/타임아웃이 없다. 스크래핑이 길면 GUI가 “실행 중”에 고정된다. | 보완 |
+| Watch 이력 미기록 | Calibre/Watch 전송은 `synced_posts`에 안 남는다. 같은 파일을 다시 쓰면 재전송된다. | 보완 (의도일 수 있음) |
+| `fetch_url` 타임아웃 고정 | 사이트마다 15초. 큰 페이지·느린 블로그는 부분 실패. | 보완 |
+| soonsal 제목 2회 GET | H8과 동일. 기능 오류는 아님. | 보완 |
+| GUI `after(0)` TclError | `tab_calibre.py`, `preview.py`, `sync_control.py`, Watch 업로드 경로. 창을 닫은 뒤 콜백이 오면 예외. | 보완 |
+| `X3Uploader.last_errors` | `ThreadPoolExecutor` 워커가 락 없이 dict를 쓴다. CPython GIL 아래 실무 영향은 작다. | 보완 |
+| `ProcessFileLock` 경로 | `tempfile.gettempdir()/x3_websync_pipeline.lock` — **설치 폴더가 달라도 머신 전역 1개**. 두 휴대용 폴더를 동시에 `--sync`할 수 없다. | 보완 (의도일 수 있음) |
+| 폰트 `Malgun Gothic` | `widgets.py`. Windows 전제. macOS/Linux는 대체 폰트에 의존. | OS 호환 |
+| `epub_theme` 경로 | 화이트리스트는 validator 경고뿐. 수동 `config.json`에 `../`를 넣으면 `themes_dir()` 밖으로 읽기를 시도한다. | 입력 검증 |
 
-3. **[추정] 대용량 다운로드 중 GUI 취소 버튼 지원**
-   - 현재 `download_and_stage`는 백그라운드 스레드에서 끝까지 스트리밍을 수행합니다. 네트워크가 매우 느리거나 사용자가 다운로드를 중단하고 싶을 때 '취소' 버튼을 누를 수 있는 `cancel_token` 또는 `Event` 연동이 있으면 더욱 안전합니다.
+### 추정
 
-4. **[추정] EXE 빌드 배포판과 Python 환경 간의 기능 차이 사용자 안내**
-   - `x3_websync.spec`에서 경량화를 위해 `excludes` 처리된 모듈(Pillow, Watchdog, googletrans 등)로 인해 EXE 배포판에서는 해당 기능이 제한될 수 있습니다. 사용자 가이드 및 GUI 상에서 "EXE 기본 버전에서는 해당 기능이 지원되지 않습니다"라는 툴팁/안내가 있으면 좋습니다.
+| ID | 내용 | 왜 추정인가 |
+|----|------|-------------|
+| **G1** | `youtube-transcript-api` 1.x에서 `YouTubeTranscriptApi.get_transcript`가 바뀌어 자막 수집이 전량 실패할 수 있다. `requirements-optional.txt`는 `>=0.6.0`. | 이 환경에서 1.x 실호출을 재현하지 않음 |
+| **G2** | Calibre가 메타데이터만 갱신하면 `on_created`가 안 떠 Watch가 침묵한다. | 실제 Calibre 버전별 I/O 패턴 미실측 |
+| **G3** | 공유 `sites.json`을 누군가 변조하면 피해자 PC가 임의 URL을 스크래핑한다. 폴더는 “사용자 신뢰” 전제. | 위협 모델이 로컬/동기화 폴더 신뢰에 달려 있음 |
+| **G4** | LibreTranslate/Ollama 호스트는 사용자 문자열 그대로 `urlopen`. `file://` 등. 공격자는 사실상 설정 소유자. | 로컬 앱 자기 SSRF |
+| **G5** | 대시보드 LAN + `X-Forwarded-Proto: https` 위조 시 Secure 쿠키가 붙어 HTTP에서 세션이 안 붙을 수 있다. 기본은 localhost. | 리버스 프록시 없는 일반 사용에서는 희귀 |
+| **G6** | 일간 합본 모드에서 사이트 하나 수집 실패(`site_errors`)면 합본 전체 `success=False`. 사용자는 “반은 모였는데 실패”로 느낄 수 있다. | UX 해석. 코드상 `digest_success and site_errors == 0`이 의도일 수 있음 |
 
 ---
 
 ## 5. Recommended Fix Plan
 
-수정 우선순위를 3단계로 나누어 제안합니다.
+### 1단계 — 즉시 (오동작·크래시·업데이트 안전망)
 
-### 1단계: 즉시 보완 (안정성 및 네트워크 캐시 최적화)
-- **CDN 캐시 방어**: `download_release_manifest`에 `Cache-Control: no-cache` 헤더 및 타임스탬프 쿼리 파라미터 추가.
-- **헬퍼 타임아웃 방어**: `x3_websync.py`의 `_handle_apply_update`에서 15초 부모 프로세스 미종료 시 명시적 실패 처리.
-- **개발 환경 안내**: `UpdateService.launch_update_and_exit`에서 non-frozen 환경일 때 명확한 피드백 다이얼로그 처리.
+1. **H1** `is_available_for_site`에 `enabled` 가드. 회귀 테스트: `enabled=False` + `provider=googletrans` + `translate_to="ko"` → 번역 호출 0회.  
+2. **H2** Watch `on_new_file` 로그를 `root.after`로 옮기고, `_log_message`에 위젯 생존 가드.  
+3. **H3** `--smoke`가 핵심 모듈을 실제로 로드하게 하고, 설치기 스모크 실패 시 롤백 테스트를 유지한 채 CLI 테스트를 강화.
 
-### 2단계: 성능 및 사용자 경험(UX) 개선
-- **SQLite WAL 모드 활성화**: `SyncHistoryDb` 초기화 시 `PRAGMA journal_mode=WAL` 설정.
-- **시작 시 자동 업데이트 확인 옵션**: `config.json` 연동 및 비침해적 백그라운드 업데이트 알림 지원.
-- **릴리즈 노트 링크 제공**: 업데이트 감지 다이얼로그에 GitHub Release URL 열기 버튼 추가.
+### 2단계 — 안정성
 
-### 3단계: 구조 개선 및 확장성
-- **다운로드 취소(Cancellation Token) 지원**: `UpdateService.download_and_stage`에 `threading.Event`를 전달하여 다운로드 중단 기능 구현.
-- **다이얼로그 TclError 가드 공통 래퍼 통일**: 모든 비동기 UI 컴포넌트의 콜백을 공통 안전 래퍼로 통합.
+1. **H4** 파이프라인 진입 시 활성 사이트 URL 스킴 강제, `fetch_url` 본문 크기 상한.  
+2. **H5** Watch `on_moved` 지원 + 확장자/폴더 필터.  
+3. **H6** 백업 폴더 락 재시도. 정본 pull 실패를 로그/토스트에 명확히.  
+4. GUI `after` 콜백 전반에 `TclError` 가드 (Calibre 탭, 프리뷰, 동기화 종료).  
+5. 뉴스레터 상세 1회 GET으로 본문+제목 (H8).
+
+### 3단계 — 구조·문서
+
+1. **H10** CLAUDE.md / DEVELOPER.md / README: CustomTkinter, 테스트 253, 로드맵 “완료/잔여” 분리, smoke 의미 정정.  
+2. EPUB sanitize 범위 확대 (H7).  
+3. `_make_uploader`에 `primary_device_id` 전달 (H9).  
+4. (선택) 프로세스 락을 `PROJECT_ROOT` 기준으로 바꿔 휴대용 다중 설치를 허용할지 결정.  
+5. 동기화 취소 API (GUI 버튼 + 대시보드).  
+6. YouTube 자막 API 1.x 호환 래퍼 (G1 확인 후).
 
 ---
 
 ## 6. Test Recommendations
 
-현재 246개의 단위 테스트가 작성되어 있으며 통과율 100%를 기록하고 있습니다. 추가로 보강하면 좋은 테스트 케이스들입니다:
+현재 스위트는 config/DB/파이프라인/OPDS/대시보드/업데이터 단위가 두껍다. 아래는 **없는 계약** 위주다.
 
-1. **CDN 캐시 버스팅 및 헤더 전송 검증 테스트**:
-   - `download_release_manifest` 호출 시 `Request` 객체에 `Cache-Control: no-cache` 헤더와 쿼리 파라미터가 올바르게 주입되는지 검증하는 단위 테스트.
-2. **헬퍼 프로세스 부모 미종료 실패 테스트**:
-   - `_handle_apply_update`에서 부모 PID가 종료되지 않는 시나리오를 모킹하여 에러 코드(1)와 결과 파일 기록을 검증하는 테스트.
-3. **업데이트 다이얼로그 위젯 생존성 테스트**:
-   - `SettingsUpdaterMixin`의 콜백 실행 중 위젯이 이미 파괴(`destroy()`)된 상태일 때 TclError 없이 안전하게 무시되는지 검증하는 GUI 모킹 테스트.
-4. **SQLite WAL 모드 적용 회귀 테스트**:
-   - `SyncHistoryDb` 인스턴스화 후 `PRAGMA journal_mode` 쿼리 결과가 `wal`로 반환되는지 확인하는 테스트.
+### 반드시 추가
+
+| 테스트 | 실패 조건 (기대) |
+|--------|------------------|
+| `test_translator_googletrans_respects_enabled_false` | `enabled=False`이면 `_get_gtrans`/`translate`가 호출되지 않음 |
+| `test_watch_on_new_file_logs_via_after` | `on_new_file`이 `_log_message`를 직접 호출하지 않음 (after 또는 큐만) |
+| `test_cli_smoke_imports_core_modules` | `--smoke`가 0이어도, 구현 변경 후 핵심 import 실패 시 non-zero가 되도록 모듈 목록을 고정 |
+| `test_pipeline_rejects_non_http_site_url` | `url=file:///tmp/x` 활성 사이트는 수집하지 않음 (H4 수정 후) |
+| `test_calibre_watch_handles_moved_epub` | `on_moved` dest `.epub`이 debounce 큐에 들어감 |
+
+### 보강
+
+| 테스트 | 목적 |
+|--------|------|
+| `test_newsletter_extract_links_strips_fragment` | `newsletter_base` 공통 (soonsal 픽스처와 별도로 기반 클래스) |
+| `test_newsletter_get_title_does_not_refetch` | 상세 1회 GET (H8 수정 후) |
+| `test_backup_pull_retries_when_folder_locked` | 락 점유 중 skip vs retry |
+| `test_fetch_url_enforces_max_bytes` | 거대 응답 절단/예외 |
+| `test_sanitize_strips_iframe_and_events` | EPUB 정제 확대 후 |
+| `test_make_uploader_passes_primary_device_id` | GUI 업로더 이력 키 정합 |
+| `test_gui_after_callback_ignores_destroyed_widget` | 창 파괴 후 after 콜백 |
+
+### 실사이트 (CI 제외)
+
+- `scripts/validate_korean_scrapers.py --only soonsal,moneyletter,naver,tistory`  
+- YouTube는 선택 의존성 + API 변경이 잦으므로 픽스처/모의 응답을 단위 테스트로 고정하고, 실호출은 수동.
+
+### 허메틱 규칙 (유지)
+
+`docs/DEVELOPER.md`대로 `config.json` / `sync_history.db` / `output/` / `logs/` 를 전제하지 말 것. 신규 테스트도 `tmp_path`만 사용.
 
 ---
 
-## 7. 개선 및 보완 반영 완료 내역 (2026-08-16)
+## 부록. 이번 감사에서 확인한 최근 수정
 
-본 감사에서 도출된 모든 개선 과제가 코드 및 테스트에 반영되었습니다:
-
-1. ✅ **CDN 캐시 방어**: `download_release_manifest`에 `Cache-Control: no-cache` 헤더 및 타임스탬프 쿼리 버스팅(`?_t=...`) 적용 완료.
-2. ✅ **헬퍼 프로세스 타임아웃 처리**: `x3_websync.py` `_handle_apply_update`에서 15초 부모 프로세스 미종료 시 안전한 실패 결과 기록 및 종료 처리.
-3. ✅ **개발 환경(Non-frozen) 안내**: `UpdateService.launch_update_and_exit` 및 `SettingsUpdaterMixin`에서 소스 실행 환경 시 파일 경로와 개발 모드 안내 다이얼로그 표시.
-4. ✅ **SQLite WAL 저널 모드**: `SyncHistoryDb` 초기화 시 `PRAGMA journal_mode=WAL` 및 `PRAGMA synchronous=NORMAL` 활성화로 동시성 및 I/O 성능 향상.
-5. ✅ **시작 시 자동 업데이트 확인 옵션**: `config.json`의 `auto_check_update: true` 옵션 및 GUI 체크박스 연동, 기동 후 백그라운드 확인 및 하단 로그 바 알림 구현.
-6. ✅ **릴리즈 노트 링크 제공**: GUI 설정 탭에 "🔗 릴리즈 노트(Changelog) 보기" 버튼 연동.
-7. ✅ **다운로드 취소 지원**: `UpdateService.download_and_stage` 및 `prepare_staged_update`에 `threading.Event` 기반 취소 토큰(`cancel_event`) 및 임시 파일 자동 정리 구현.
-8. ✅ **단위 테스트 보강**: 신규 기능 테스트를 포함한 총 **250개 단위 테스트 100% 통과**.
-
+작업 트리의 `newsletter_base._extract_links`는 `#story-N` fragment를 `urldefrag`로 제거한다. 순살 아카이브가 본문 1개 + 목차 앵커 5개를 올려 같은 호가 4회 이상 잡히던 문제는 **현재 코드 기준으로는 해소된 상태**다. 회귀는 `tests/test_soonsal_scraper.py`가 담당한다.

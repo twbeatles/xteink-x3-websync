@@ -97,6 +97,11 @@ scripts/_tmp_*.py
 *.lock
 *.pid
 *.lockfile
+x3_websync_pipeline.lock
+x3_websync_instance.lock
+
+# Auto-update staging (downloaded exe / helper / last-update-result)
+.updates/
 
 # Scraper validation dumps (local artifacts)
 output/scraper_validation.json

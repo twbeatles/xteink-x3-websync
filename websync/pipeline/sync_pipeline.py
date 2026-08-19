@@ -5,6 +5,7 @@ import os
 from typing import Callable, Optional
 
 from websync.scrapers import ScraperFactory
+from websync.scrapers.base import is_allowed_fetch_url
 from websync.integrations.notifier import ToastNotifier
 from websync.db.history import SyncHistoryDbError
 from websync.pipeline.summarizer import Summarizer
@@ -37,6 +38,8 @@ def run_sync_pipeline_locked(
             print(msg)
 
     log("✨ 동기화 프로세스를 실행합니다...")
+    if hasattr(service, "clear_cancel"):
+        service.clear_cancel()
     service._reload_config()
 
     summarizer = Summarizer(service.config, logger=service.logger)
@@ -96,6 +99,17 @@ def run_sync_pipeline_locked(
         scraper_type = site.get("type", "css")
         base_url = site.get("url", "")
         translate_to = site.get("translate_to", "").strip()
+
+        if getattr(service, "is_cancel_requested", lambda: False)():
+            log("⏹ 사용자에 의해 동기화가 취소되었습니다.")
+            service._last_pipeline_result = {"status": "cancelled", "success": False}
+            ToastNotifier.show_toast("X3 WebSync 취소", "동기화가 취소되었습니다.", is_error=True)
+            return False
+
+        if not is_allowed_fetch_url(base_url):
+            site_errors += 1
+            log(f"⚠️ [{name}] URL이 http(s)가 아니어서 건너뜁니다: {(base_url or '')[:80]}")
+            continue
 
         if progress_callback:
             progress_callback(site_idx, total_sites)

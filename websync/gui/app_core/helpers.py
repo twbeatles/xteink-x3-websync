@@ -38,6 +38,8 @@ class AppHelpersMixin:
         
         # 각 탭의 활성 버튼 상태 제어
         self.bottom_bar.sync_now_btn.configure(state=state)
+        if hasattr(self.bottom_bar, "cancel_sync_btn"):
+            self.bottom_bar.cancel_sync_btn.configure(state="normal" if busy else "disabled")
         self.bottom_bar.preview_btn.configure(state=state)
         self.tab_sync.direct_upload_btn.configure(state=state)
         self.tab_sync.test_conn_btn.configure(state=state)
@@ -45,23 +47,33 @@ class AppHelpersMixin:
         self.tab_calibre.calibre_conn_btn.configure(state=state)
 
     def _log_message(self, message: str):
-        self.bottom_bar.log_txt.configure(state="normal")
-        self.bottom_bar.log_txt.insert(tk.END, message + "\n")
-        self.bottom_bar.log_txt.see(tk.END)
-        self.bottom_bar.log_txt.configure(state="disabled")
+        try:
+            if not getattr(self, "root", None) or not self.root.winfo_exists():
+                return
+            self.bottom_bar.log_txt.configure(state="normal")
+            self.bottom_bar.log_txt.insert(tk.END, message + "\n")
+            self.bottom_bar.log_txt.see(tk.END)
+            self.bottom_bar.log_txt.configure(state="disabled")
+        except tk.TclError:
+            return
 
     def _update_progress(self, current: int, total: int):
-        if total > 0:
-            if hasattr(self.bottom_bar.progress_bar, "set"):
-                self.bottom_bar.progress_bar.set(min(1.0, max(0.0, current / total)))
+        try:
+            if not getattr(self, "root", None) or not self.root.winfo_exists():
+                return
+            if total > 0:
+                if hasattr(self.bottom_bar.progress_bar, "set"):
+                    self.bottom_bar.progress_bar.set(min(1.0, max(0.0, current / total)))
+                else:
+                    self.bottom_bar.progress_bar["maximum"] = total
+                    self.bottom_bar.progress_bar["value"] = current
             else:
-                self.bottom_bar.progress_bar["maximum"] = total
-                self.bottom_bar.progress_bar["value"] = current
-        else:
-            if hasattr(self.bottom_bar.progress_bar, "set"):
-                self.bottom_bar.progress_bar.set(0)
-            else:
-                self.bottom_bar.progress_bar["value"] = 0
+                if hasattr(self.bottom_bar.progress_bar, "set"):
+                    self.bottom_bar.progress_bar.set(0)
+                else:
+                    self.bottom_bar.progress_bar["value"] = 0
+        except tk.TclError:
+            return
 
     def _open_url(self, url: str):
         if url:
@@ -84,6 +96,7 @@ class AppHelpersMixin:
             config.get("x3_ip", "").strip() or self.tab_sync.ip_entry.get().strip(),
             config.get("x3_devices", []),
             remote_dir=df.get("default_upload_path", "/"),
+            primary_device_id=config.get("x3_primary_device_id", "") or "",
         )
 
     def _ip_display_name(self, ip: str) -> str:

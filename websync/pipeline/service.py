@@ -27,6 +27,7 @@ class SyncService:
         self.logger = get_logger()
         self.backup_sync = BackupSyncService(self.config_manager, self.db, self.logger)
         self._last_pipeline_result: dict = {}
+        self._cancel_event = threading.Event()
         self._backup_push_timer: threading.Timer | None = None
         self._backup_timer_lock = threading.Lock()
         self._apply_config_to_components()
@@ -72,6 +73,16 @@ class SyncService:
 
     def get_last_pipeline_result(self) -> dict:
         return dict(self._last_pipeline_result)
+
+    def request_cancel(self) -> None:
+        """실행 중인 파이프라인에 취소 요청 (사이트 경계에서 중단)."""
+        self._cancel_event.set()
+
+    def clear_cancel(self) -> None:
+        self._cancel_event.clear()
+
+    def is_cancel_requested(self) -> bool:
+        return self._cancel_event.is_set()
 
     def _reload_config(self):
         """최신 설정을 리로드하고 서비스 컴포넌트에 반영"""

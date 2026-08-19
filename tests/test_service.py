@@ -284,3 +284,49 @@ def test_last_pipeline_result_is_instance_variable():
 
     assert svc2._last_pipeline_result == {} or svc2._last_pipeline_result.get("status") != "test_instance_1"
     assert svc1._last_pipeline_result["status"] == "test_instance_1"
+
+
+def test_pipeline_skips_non_http_site_url():
+    cm = MagicMock(spec=ConfigManager)
+    cm.load_config.return_value = _base_config([
+        {"name": "Bad", "type": "css", "url": "file:///tmp/x", "enabled": True, "limit": 1},
+        {"name": "Good", "type": "rss", "url": "https://ex.com/feed", "enabled": True, "limit": 1},
+    ])
+    cm.get_resolved_output_dir.return_value = "./output"
+    svc = SyncService(cm)
+    mock_scraper = MagicMock()
+    mock_scraper.fetch_articles.return_value = []
+    mock_scraper.last_fetch_stats = {}
+    with patch.object(ScraperFactory, "get_scraper", return_value=mock_scraper):
+        with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+            svc.run_sync_pipeline()
+    # file:// 사이트는 get_scraper 호출 없이 스킵
+    called_sites = [c.args[0] for c in mock_scraper.fetch_articles.call_args_list] if mock_scraper.fetch_articles.called else []
+    # fetch_articles 인자인 site dict
+    urls = [c.kwargs.get("site") if False else c.args[0].get("url") for c in mock_scraper.fetch_articles.call_args_list]
+    assert "file:///tmp/x" not in urls
+    assert "https://ex.com/feed" in urls
+
+
+def test_pipeline_cancel_stops_between_sites():
+    cm = MagicMock(spec=ConfigManager)
+    cm.load_config.return_value = _base_config([
+        {"name": "A", "type": "rss", "url": "https://a.example/feed", "enabled": True, "limit": 1},
+        {"name": "B", "type": "rss", "url": "https://b.example/feed", "enabled": True, "limit": 1},
+    ])
+    cm.get_resolved_output_dir.return_value = "./output"
+    svc = SyncService(cm)
+
+    def fetch_and_cancel(site):
+        svc.request_cancel()
+        return []
+
+    mock_scraper = MagicMock()
+    mock_scraper.fetch_articles.side_effect = fetch_and_cancel
+    mock_scraper.last_fetch_stats = {}
+    with patch.object(ScraperFactory, "get_scraper", return_value=mock_scraper):
+        with patch("websync.pipeline.sync_pipeline.ToastNotifier.show_toast"):
+            result = svc.run_sync_pipeline()
+    assert result is False
+    assert svc.get_last_pipeline_result().get("status") == "cancelled"
+    assert mock_scraper.fetch_articles.call_count == 1

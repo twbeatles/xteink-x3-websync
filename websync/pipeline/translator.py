@@ -26,13 +26,13 @@ class Translator:
 
     def is_available_for_site(self, translate_to: str) -> bool:
         """사이트별 translate_to가 설정된 경우 번역 가능 여부를 판단합니다."""
+        if not self.enabled:
+            return False
         if not (translate_to or "").strip():
             return False
-        if self.provider == "libretranslate":
-            return self.enabled
         if self.provider == "googletrans":
             return self._get_gtrans() is not None
-        return self.enabled
+        return True
 
     def _get_gtrans(self):
         if self._gtrans is None:
@@ -74,6 +74,10 @@ class Translator:
             result = gt.translate(text, dest=target, src=source if source != "auto" else None)
             return result.text
         elif self.provider == "libretranslate":
+            host = (self.libretranslate_host or "").strip()
+            if not (host.startswith("http://") or host.startswith("https://")):
+                self._warn(f"LibreTranslate 호스트는 http(s)만 허용합니다: {host[:80]}")
+                return text
             import urllib.request
             import json
             payload = {
@@ -83,7 +87,7 @@ class Translator:
                 "api_key": self.libretranslate_api_key
             }
             req = urllib.request.Request(
-                f"{self.libretranslate_host}/translate",
+                f"{host.rstrip('/')}/translate",
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST"

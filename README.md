@@ -94,6 +94,7 @@ GitHub Releases에 새 버전이 출시되면 **고급 설정 → 소프트웨�
 | 여러 기기 | 기기 여러 대에 동시 전송 |
 | 기기 파일 탭 | 기기 안 파일 목록·삭제·이동·정리 |
 | 예약 실행 | 매일 자동 동기화 |
+| 동기화 취소 | 실행 중 **취소** 또는 웹 대시보드 `POST /api/cancel` |
 | 자동 업데이트 | Ed25519 서명 검증 기반 GitHub Releases 원클릭 안전 업데이트 |
 | 웹·OPDS (선택) | 브라우저·OPDS 클라이언트로 접근 |
 
@@ -118,7 +119,7 @@ GitHub Releases에 새 버전이 출시되면 **고급 설정 → 소프트웨�
 ## 환경
 
 - **Python** 3.10 이상 (소스 실행 시)
-- 필수 패키지: `requirements.txt`
+- 필수 패키지: `requirements.txt` (CustomTkinter, requests, ebooklib 등)
 - 선택 기능(표지·번역·YouTube·폴더 감시): `requirements-optional.txt`
 - Calibre 연동 시 PC에 Calibre 설치 필요
 

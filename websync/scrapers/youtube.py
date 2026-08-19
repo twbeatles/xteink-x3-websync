@@ -46,25 +46,42 @@ class YoutubeScraper(BaseScraper):
             raise Exception(f"YouTube 채널 수집 실패: {e}") from e
         return articles
 
+    @staticmethod
+    def _fetch_transcript_segments(video_id: str, languages: list) -> list[dict]:
+        """youtube-transcript-api 0.6(get_transcript) / 1.x(fetch) 호환."""
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        getter = getattr(YouTubeTranscriptApi, "get_transcript", None)
+        if callable(getter):
+            return getter(video_id, languages=languages)
+
+        api = YouTubeTranscriptApi()
+        fetched = api.fetch(video_id, languages=languages)
+        out: list[dict] = []
+        for seg in fetched:
+            if isinstance(seg, dict):
+                out.append({"text": seg.get("text") or ""})
+            else:
+                out.append({"text": getattr(seg, "text", "") or ""})
+        return out
+
     def _fetch_transcript(self, video_id: str, title: str) -> str:
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
-            # 한국어 자막 우선, 없으면 자동생성 한국어, 없으면 영어
             for lang in (["ko"], ["en"]):
                 try:
-                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=lang)
-                    # 문장 단위 단락 구성
+                    transcript = self._fetch_transcript_segments(video_id, lang)
                     paragraphs = []
                     chunk = []
                     for seg in transcript:
-                        chunk.append(seg["text"])
+                        chunk.append(seg.get("text") or "")
                         if len(chunk) >= 10:
                             paragraphs.append("<p>" + " ".join(chunk) + "</p>")
                             chunk = []
                     if chunk:
                         paragraphs.append("<p>" + " ".join(chunk) + "</p>")
-                    return "\n".join(paragraphs)
-                except (NoTranscriptFound, Exception):
+                    if paragraphs:
+                        return "\n".join(paragraphs)
+                except Exception:
                     continue
         except ImportError:
             print("⚠️ youtube_transcript_api 미설치. pip install youtube-transcript-api")

@@ -97,7 +97,7 @@ xteink-x3-websync/
 ├── sync_history.db            # 전송 이력 DB (gitignore)
 ├── output/                    # 생성 EPUB (gitignore)
 ├── logs/                      # 실행 로그 (gitignore)
-├── tests/                     # pytest (246 tests)
+├── tests/                     # pytest (수집 수는 `pytest --collect-only -q`)
 ├── scripts/                   # migrate, build/verify update manifest & keys
 ├── updates/                   # latest.json (Ed25519 서명 릴리즈 매니페스트)
 ├── requirements.txt           # 필수 + pytest + cryptography
@@ -127,12 +127,14 @@ xteink-x3-websync/
 | 역할 | CLI `--sync` 플래그 분기 / GUI 앱 기동 |
 | 보안 패치 | `NullWriter` 클래스로 pythonw.exe stdout=None 방어 |
 | 다중 실행 방지 | GUI: Windows named mutex + 락 파일 / Unix flock |
-| `--sync` 모드 | GUI 락 없이 기동 — `threading.Lock` + **프로세스 파일 락**으로 직렬화 |
+| `--sync` 모드 | GUI 락 없이 기동 — `threading.Lock` + **프로세스 파일 락**(`PROJECT_ROOT/x3_websync_pipeline.lock`)으로 직렬화 |
+| `--smoke` | 핵심 모듈 import 검증. 성공 0 / 실패 1 (업데이트 롤백 스모크) |
 | 주의 | GUI 락은 `finally`에서 항상 해제됨 |
 
 **호출 관계**:
 ```
 main()
+  ├── [--smoke] run_smoke_check()
   ├── [GUI만] acquire_instance_lock()
   ├── ConfigManager()
   ├── SyncService(config_manager)
@@ -218,7 +220,8 @@ main()
 | 동시성 | `threading.Lock` + `ProcessFileLock` (GUI / `--sync` 프로세스 간 직렬화) |
 | 중복 필터 | `needs_sync(url, target_ips)` — 기기 중 하나라도 미전송이면 포함 |
 | 재전송 | `upload_to_targets(..., only_ips=pending)` — **미전송 기기만** 업로드 |
-| 결과 반환 | `bool` — True: 신규 없음·전체 성공 / False: 오류·부분 실패·이미 실행 중 |
+| 결과 반환 | `bool` — True: 신규 없음·전체 성공 / False: 오류·부분 실패·이미 실행 중·취소 |
+| 취소 | `request_cancel()` — 사이트 경계에서 `status=cancelled` |
 | 상태 API | `get_last_pipeline_result()` — 웹 대시보드 `/api/status` 연동 |
 
 **파이프라인 흐름**:
@@ -345,9 +348,9 @@ run_sync_pipeline()
 
 | 항목 | 내용 |
 |------|------|
-| 프레임워크 | `tkinter` + `ttk` |
+| 프레임워크 | CustomTkinter (`customtkinter`) + tkinter 다이얼로그 |
 | 조립 | `app_core/` (`SyncAppGui`), 탭 패키지: `sync_tab/`, `device_files/`, `settings_tab/` |
-| 테마 | Clean Light Theme (`#f8f9fa` 배경, Bootstrap 스타일 포인트 컬러) |
+| 테마 | System/Light/Dark (`widgets.py` COLOR_* 튜플) |
 | 탭 구조 | 뉴스 동기화 / Calibre / 이력 / 기기 파일 / 고급·서버 설정 |
 | 비동기 | `threading.Thread(daemon=True)` + `root.after(0, callback)` 패턴 |
 | 호환 | `gui/app.py`, `tab_sync.py` 등은 re-export 유지 |

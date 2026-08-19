@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any, Optional
 
 from websync.backup.atomic_io import ensure_dir, read_json_safe, write_json_atomic
@@ -103,10 +104,20 @@ class BackupSyncService:
             self.last_result = result
             return result
 
-    def _acquire_folder_lock(self, folder: str) -> ProcessFileLock | None:
+    def _acquire_folder_lock(
+        self,
+        folder: str,
+        *,
+        attempts: int = 6,
+        delay: float = 0.4,
+    ) -> ProcessFileLock | None:
         lock = ProcessFileLock(os.path.join(folder, LOCK_FILENAME))
-        if lock.acquire(blocking=False):
-            return lock
+        tries = max(1, int(attempts))
+        for i in range(tries):
+            if lock.acquire(blocking=False):
+                return lock
+            if i < tries - 1:
+                time.sleep(max(0.05, float(delay)))
         return None
 
     def _pull_unlocked(self, *, force: bool = False) -> dict[str, Any]:

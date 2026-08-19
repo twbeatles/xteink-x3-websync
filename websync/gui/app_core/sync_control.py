@@ -28,6 +28,11 @@ from websync.gui.bottom_bar import BottomBar
 
 
 class AppSyncControlMixin:
+    def _request_sync_cancel(self):
+        if hasattr(self, "service") and self.service:
+            self.service.request_cancel()
+            self._log_message("⏹ 동기화 취소를 요청했습니다. 현재 사이트 처리가 끝나면 중단됩니다.")
+
     def _run_immediate_sync(self):
         self._save_ui_settings()
         self._set_sync_ui_busy(True)
@@ -44,15 +49,20 @@ class AppSyncControlMixin:
         threading.Thread(target=run, daemon=True).start()
 
     def _sync_finished_ui(self):
-        maximum = float(self.bottom_bar.progress_bar["maximum"] or 0)
-        if maximum > 0:
-            self.bottom_bar.progress_bar["value"] = maximum
-            self.root.after(1500, lambda: self.bottom_bar.progress_bar.configure(value=0))
-        else:
-            self.bottom_bar.progress_bar["value"] = 0
-        self._set_sync_ui_busy(False)
-        self._log_message("=== 동기화 프로세스 종료 ===\n")
-        self.tab_history._refresh_history()
+        try:
+            if not self.root.winfo_exists():
+                return
+            bar = self.bottom_bar.progress_bar
+            if hasattr(bar, "set"):
+                bar.set(0)
+            else:
+                maximum = float(bar["maximum"] or 0)
+                bar["value"] = maximum if maximum > 0 else 0
+            self._set_sync_ui_busy(False)
+            self._log_message("=== 동기화 프로세스 종료 ===\n")
+            self.tab_history._refresh_history()
+        except tk.TclError:
+            return
 
     # ------------------------------------------------------------------
     # 종료 처리

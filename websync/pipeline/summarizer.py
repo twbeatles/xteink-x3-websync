@@ -83,9 +83,13 @@ class Summarizer:
     def _call_ollama(self, prompt: str) -> str:
         import urllib.request
         import json
+        host = (self.ollama_host or "").strip()
+        if not (host.startswith("http://") or host.startswith("https://")):
+            self._warn(f"Ollama 호스트는 http(s)만 허용합니다: {host[:80]}")
+            return ""
         payload = {"model": self.model, "prompt": prompt, "stream": False}
         req = urllib.request.Request(
-            f"{self.ollama_host}/api/generate",
+            f"{host.rstrip('/')}/api/generate",
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
             method="POST"

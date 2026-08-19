@@ -54,7 +54,11 @@ class SettingsWatchMixin:
                         watch_queue.task_done()
 
             def on_new_file(fpath: str):
-                self.app._log_message(f"👁 새 파일 감지: {os.path.basename(fpath)} → 전송 큐 대기 중")
+                name = os.path.basename(fpath)
+                self.app.root.after(
+                    0,
+                    lambda n=name: self.app._log_message(f"👁 새 파일 감지: {n} → 전송 큐 대기 중"),
+                )
                 watch_queue.put(fpath)
 
             # 워커 스레드 시작

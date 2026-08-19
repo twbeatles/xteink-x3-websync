@@ -18,6 +18,15 @@ def test_cli_smoke():
     assert "smoke check OK" in completed.stdout
 
 
+def test_run_smoke_check_loads_core_modules():
+    from x3_websync import SMOKE_MODULES, run_smoke_check
+
+    assert "websync.pipeline.service" in SMOKE_MODULES
+    assert "websync.scrapers.factory" in SMOKE_MODULES
+    assert "websync.epub.builder" in SMOKE_MODULES
+    assert run_smoke_check() == 0
+
+
 def test_cli_version():
     completed = subprocess.run(
         [sys.executable, "x3_websync.py", "--version"],

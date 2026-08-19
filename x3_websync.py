@@ -188,6 +188,35 @@ def release_instance_lock():
 
 from websync import __version__
 
+# --smoke 가 실제로 로드해야 하는 핵심 모듈 (GUI 제외 — 헤드리스 헬퍼 안전)
+SMOKE_MODULES: tuple[str, ...] = (
+    "websync.config.manager",
+    "websync.pipeline.service",
+    "websync.scrapers.factory",
+    "websync.epub.builder",
+    "websync.db.history",
+    "websync.upload.uploader",
+)
+
+
+def run_smoke_check() -> int:
+    """핵심 모듈 import 무결성. 성공 0, 실패 1."""
+    import importlib
+
+    failed: list[str] = []
+    for name in SMOKE_MODULES:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:
+            failed.append(f"{name}: {exc}")
+    if failed:
+        print("Xteink X3 WebSync smoke check FAILED")
+        for item in failed:
+            print(f"  - {item}")
+        return 1
+    print(f"Xteink X3 WebSync v{__version__} smoke check OK")
+    return 0
+
 
 def _handle_apply_update(args) -> int:
     import time
@@ -244,7 +273,7 @@ def main():
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="바이너리 및 핵심 모듈 로드 무결성 스모크 체크 (exit 0)",
+        help="핵심 모듈 import 무결성 스모크 체크 (성공 0, 실패 1)",
     )
     parser.add_argument(
         "-v", "--version",
@@ -270,8 +299,7 @@ def main():
 
     # 1. 스모크 체크
     if args.smoke:
-        print(f"Xteink X3 WebSync v{__version__} smoke check OK")
-        sys.exit(0)
+        sys.exit(run_smoke_check())
 
     # 2. 업데이터 헬퍼 실행
     if args.apply_update:

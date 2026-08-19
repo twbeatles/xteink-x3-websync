@@ -1,5 +1,30 @@
 import pytest
-from websync.scrapers.base import _session, fetch_url
+from unittest.mock import MagicMock, patch
+
+from websync.scrapers.base import FETCH_MAX_BYTES, _session, fetch_url, is_allowed_fetch_url
+
+
+def test_is_allowed_fetch_url_http_only():
+    assert is_allowed_fetch_url("https://example.com/a") is True
+    assert is_allowed_fetch_url("http://example.com/a") is True
+    assert is_allowed_fetch_url("file:///tmp/x") is False
+    assert is_allowed_fetch_url("ftp://example.com/a") is False
+    assert is_allowed_fetch_url("") is False
+
+
+def test_fetch_url_rejects_non_http_scheme():
+    with pytest.raises(ValueError, match="http"):
+        fetch_url("file:///tmp/secret")
+
+
+def test_fetch_url_enforces_max_bytes():
+    mock_resp = MagicMock()
+    mock_resp.headers = {"Content-Length": str(FETCH_MAX_BYTES + 1)}
+    mock_resp.close = MagicMock()
+    with patch.object(_session, "get", return_value=mock_resp):
+        with pytest.raises(ValueError, match="크기"):
+            fetch_url("https://example.com/huge")
+    mock_resp.close.assert_called()
 
 
 def test_base_scraper_session_pool_size():

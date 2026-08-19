@@ -224,6 +224,48 @@ def test_backup_push_respects_auto_export():
             pass
 
 
+def test_backup_pull_retries_when_folder_locked():
+    """폴더 락이 잠시 점유 중이면 재시도 후 획득한다."""
+    tmp = tempfile.mkdtemp()
+    try:
+        cloud = os.path.join(tmp, "cloud")
+        os.makedirs(cloud)
+        from websync.backup.format import LOCK_FILENAME
+        from websync.core.process_lock import ProcessFileLock
+
+        holder = ProcessFileLock(os.path.join(cloud, LOCK_FILENAME))
+        assert holder.acquire(blocking=False)
+
+        cm = ConfigManager(os.path.join(tmp, "config.json"))
+        cfg = cm.load_config()
+        cfg["backup_sync"] = {"enabled": True, "folder": cloud, "include_history": True}
+        cm.save_config(cfg)
+        db = SyncHistoryDb(os.path.join(tmp, "history.db"))
+        svc = BackupSyncService(cm, db)
+
+        released = {"ok": False}
+
+        def _release_soon():
+            time.sleep(0.25)
+            holder.release()
+            released["ok"] = True
+
+        import threading
+        t = threading.Thread(target=_release_soon)
+        t.start()
+        result = svc.pull(force=True)
+        t.join(timeout=3)
+        assert released["ok"] is True
+        assert result.get("skipped") is not True or result.get("ok") is True
+        _cleanup_objs(svc, db, cm)
+    finally:
+        try:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+        except Exception:
+            pass
+
+
 def test_history_payload_helpers():
     payload = build_history_payload(
         [{"url": "u", "device_ip": "1.1.1.1", "site_name": "s", "title": "t", "synced_at": "2026-01-01 00:00:00"}]

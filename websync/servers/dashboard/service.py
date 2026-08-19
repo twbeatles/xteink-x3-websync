@@ -23,6 +23,7 @@ class WebDashboard:
         pipeline_busy_callback: Optional[Callable[[], bool]] = None,
         get_status_callback: Optional[Callable[[], dict]] = None,
         allow_lan: bool = False,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ):
         self.port = port
         self.bind_host = bind_host
@@ -32,6 +33,7 @@ class WebDashboard:
         self.pipeline_busy_callback = pipeline_busy_callback
         self.get_status_callback = get_status_callback
         self.allow_lan = allow_lan
+        self.cancel_callback = cancel_callback
         self._server: Optional[DashboardHTTPServer] = None
         self._running = False
 
@@ -50,6 +52,7 @@ class WebDashboard:
                 self.pipeline_busy_callback,
                 self.get_status_callback,
                 self.allow_lan,
+                self.cancel_callback,
             )
             t = threading.Thread(target=self._server.serve_forever, daemon=True)
             t.start()

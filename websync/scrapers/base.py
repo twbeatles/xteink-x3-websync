@@ -3,7 +3,7 @@ import re
 import requests
 from abc import ABC, abstractmethod
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from requests.adapters import HTTPAdapter
 
 try:
@@ -16,6 +16,20 @@ from websync.core.article import ensure_article_url
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+# 스크래퍼 GET 본문 상한 (메모리 폭주 방지)
+FETCH_MAX_BYTES = 16 * 1024 * 1024
+
+
+def is_allowed_fetch_url(url: str) -> bool:
+    """스크래핑용 URL은 http(s) + 호스트가 있을 때만 허용."""
+    try:
+        parsed = urlparse((url or "").strip())
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return bool(parsed.netloc)
 
 
 def _build_session() -> requests.Session:
@@ -44,11 +58,37 @@ def fetch_url(url: str, headers: dict | None = None, timeout: int = 15) -> reque
 
     모든 스크래퍼는 이 헬퍼를 사용하여 일시적 네트워크 오류에 대한
     자동 재시도(최대 3회, 백오프 0.5초) 및 연결 풀링을 활용합니다.
+    http(s)만 허용하며 본문은 FETCH_MAX_BYTES 를 넘으면 실패합니다.
     """
+    if not is_allowed_fetch_url(url):
+        raise ValueError(f"http(s) URL만 요청할 수 있습니다: {(url or '')[:80]}")
     merged = dict(HEADERS)
     if headers:
         merged.update(headers)
-    return _session.get(url, headers=merged, timeout=timeout)
+    resp = _session.get(url, headers=merged, timeout=timeout, stream=True)
+    cl = resp.headers.get("Content-Length")
+    try:
+        if cl is not None and int(cl) > FETCH_MAX_BYTES:
+            resp.close()
+            raise ValueError(f"응답 크기가 제한({FETCH_MAX_BYTES} bytes)을 초과합니다")
+    except (TypeError, ValueError) as e:
+        if "제한" in str(e):
+            raise
+    body = bytearray()
+    try:
+        for chunk in resp.iter_content(64 * 1024):
+            if not chunk:
+                continue
+            body.extend(chunk)
+            if len(body) > FETCH_MAX_BYTES:
+                resp.close()
+                raise ValueError(f"응답 크기가 제한({FETCH_MAX_BYTES} bytes)을 초과합니다")
+    except Exception:
+        resp.close()
+        raise
+    resp._content = bytes(body)
+    resp._content_consumed = True
+    return resp
 
 
 def maybe_strip_images(element, site_config: dict):

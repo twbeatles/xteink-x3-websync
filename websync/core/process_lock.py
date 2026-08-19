@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import time
 from typing import Optional
 
@@ -17,11 +16,14 @@ class ProcessFileLock:
     - Unix: fcntl.flock
     - Windows: msvcrt.locking
     락을 잡은 동안 파일 핸들을 유지합니다.
+    기본 경로는 설치/프로젝트 폴더(PROJECT_ROOT)라서 휴대용 다중 설치가 서로 막히지 않습니다.
     """
 
     def __init__(self, lock_path: str | None = None):
         if lock_path is None:
-            lock_path = os.path.join(tempfile.gettempdir(), DEFAULT_PIPELINE_LOCK_NAME)
+            from websync.core.paths import PROJECT_ROOT
+
+            lock_path = os.path.join(PROJECT_ROOT, DEFAULT_PIPELINE_LOCK_NAME)
         self.lock_path = lock_path
         self._fh: Optional[object] = None
         self._held = False

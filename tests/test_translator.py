@@ -50,6 +50,23 @@ def test_translator_is_available_for_site_requires_translate_to():
     assert t.is_available_for_site("  ") is False
 
 
+def test_translator_googletrans_respects_enabled_false():
+    """전역 번역이 꺼져 있으면 googletrans가 있어도 사이트를 번역하지 않는다."""
+    t = Translator(_config(provider="googletrans", enabled=False))
+    with patch.object(t, "_get_gtrans") as mock_gt:
+        mock_gt.return_value = MagicMock()
+        assert t.is_available_for_site("ko") is False
+        mock_gt.assert_not_called()
+
+
+def test_translator_libretranslate_rejects_non_http_host():
+    cfg = _config(provider="libretranslate", enabled=True)
+    cfg["translation"]["libretranslate_host"] = "file:///tmp/evil"
+    t = Translator(cfg)
+    result = t._do_translate("hello world", "ko", "en")
+    assert result == "hello world"
+
+
 def test_translator_logger_warns_on_googletrans_load_failure():
     """googletrans provider 에서 로드 실패 시 logger.warning."""
     logger = MagicMock()

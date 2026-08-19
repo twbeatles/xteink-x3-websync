@@ -215,3 +215,27 @@ def test_dashboard_serves_concurrent_status_requests():
         assert results["sync_status"] == 202
     finally:
         srv.stop()
+
+
+def test_api_cancel_requires_auth_and_invokes_callback():
+    cancelled = {"n": 0}
+
+    def cancel_cb():
+        cancelled["n"] += 1
+        return True
+
+    srv = _start_dashboard(api_token="tok123", cancel_callback=cancel_cb)
+    try:
+        url = f"http://127.0.0.1:{srv.port}/api/cancel"
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=3)
+        assert exc.value.code == 401
+
+        req = urllib.request.Request(url, method="POST", headers={"Authorization": "Bearer tok123"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert cancelled["n"] == 1
+    finally:
+        srv.stop()

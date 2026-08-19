@@ -9,6 +9,25 @@ from websync.upload.uploader import (
 )
 
 
+def test_gui_make_uploader_passes_primary_device_id():
+    from unittest.mock import MagicMock
+
+    from websync.gui.app_core.helpers import AppHelpersMixin
+
+    helper = AppHelpersMixin.__new__(AppHelpersMixin)
+    helper.service = MagicMock()
+    helper.service.config = {
+        "x3_ip": "1.2.3.4",
+        "x3_devices": [],
+        "device_files": {"default_upload_path": "/books"},
+        "x3_primary_device_id": "dev_abc",
+    }
+    helper.tab_sync = MagicMock()
+    helper.tab_sync.ip_entry.get.return_value = ""
+    up = helper._make_uploader()
+    assert up.primary_device_id == "dev_abc"
+
+
 def test_normalize_device_host_strips_slash_and_scheme():
     assert normalize_device_host("192.168.31.54/") == "192.168.31.54"
     assert normalize_device_host("http://192.168.31.54/") == "192.168.31.54"

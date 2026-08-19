@@ -33,7 +33,7 @@ xteink-x3-websync/
 
 | 패키지 | 역할 |
 |--------|------|
-| `x3_websync.py` | 진입점 — GUI / `--sync` |
+| `x3_websync.py` | 진입점 — GUI / `--sync` / `--smoke`(핵심 모듈 import 검증) |
 | `websync.core` | 경로, 로깅, 프로세스 락, 기사 URL 유틸 |
 | `websync.config` | `config.json` CRUD, 검증, secrets 마스킹 유틸 |
 | `websync.pipeline` | 동기화·프리뷰·선택 전송 오케스트레이션 (`upload_results` 공통 헬퍼) |
@@ -42,7 +42,7 @@ xteink-x3-websync/
 | `websync.upload` | 무선 업로드, 기기 파일 API |
 | `websync.db` | 전송 이력 SQLite |
 | `websync.backup` | OneDrive 등 폴더 미러 (sites/이력) |
-| `websync.gui` | Tkinter GUI |
+| `websync.gui` | CustomTkinter GUI |
 | `websync.scheduler` | OS 스케줄 등록 |
 | `websync.servers` | OPDS · 웹 대시보드 |
 | `websync.watch` | Calibre 폴더 감시 |
@@ -104,7 +104,11 @@ python -m pytest tests/test_scraper_fixtures.py tests/test_brunch_scraper.py -q
 | 부분 재시도 | 미수신 기기만 재업로드 |
 | GUI ↔ `--sync` | 프로세스 파일 락으로 직렬화 |
 | 프리뷰/선택 동기화 | 동일 파이프라인 락 사용(`service._try_acquire_pipeline_locks`). 백업 pull → 처리 순서로 정본 일치 |
-| 웹 대시보드 동기화 | `begin_sync_pipeline_async` — 락 선점 후 수락/거부를 즉시 반환 (`POST /api/sync` → 202/409) |
+| 웹 대시보드 동기화 | `begin_sync_pipeline_async` — 락 선점 후 수락/거부를 즉시 반환 (`POST /api/sync` → 202/409). 취소는 `POST /api/cancel` → `request_cancel()` |
+| 동기화 취소 | GUI **취소** 또는 `SyncService.request_cancel()` — 사이트 경계에서 중단 (`status=cancelled`) |
+| 프로세스 락 경로 | `PROJECT_ROOT/x3_websync_pipeline.lock` (휴대용 다중 설치가 서로 막히지 않음) |
+| 스크래핑 URL | `fetch_url` 은 http(s)만 허용, 본문 16MB 상한. 잘못된 스킴 사이트는 파이프라인에서 스킵 |
+| 번역 | 전역 `translation.enabled` 가 꺼져 있으면 사이트 `translate_to` 도 무시 |
 | 웹/OPDS 서버 | `ThreadingHTTPServer` 기반 — 동시 요청 블로킹 없음 |
 | daily_digest 합본 | 합본 전용 카운터(`digest_success`/`digest_partial`)로 판정; per_site 카운터와 분리 |
 | 기기 0대 | 파이프라인 시작 시 `no_targets` 로 실패 (무의미한 스크래핑 방지) |
@@ -124,7 +128,7 @@ python -m pytest tests/test_scraper_fixtures.py tests/test_brunch_scraper.py -q
 
 | 구분 | 내용 |
 |------|------|
-| 필수 | `requirements.txt` — requests, beautifulsoup4, lxml, ebooklib 등 |
+| 필수 | `requirements.txt` — requests, beautifulsoup4, lxml, ebooklib, customtkinter, cryptography 등 |
 | 선택 | `requirements-optional.txt` — Pillow, googletrans, youtube-transcript-api, watchdog |
 | 외부 | Calibre (`calibredb`) — 서재 연동 시 |
 
@@ -139,7 +143,7 @@ python -m pytest tests/ -q --tb=short -ra
 ```
 
 주요 영역: config, db, pipeline, scrapers(픽스처), epub, uploader, servers, process_lock, backup, scheduler 등.  
-**196 케이스 통과** (2026-07-27 기준; 감사 N1~N9 수정·회귀 테스트 포함). 정확한 수는 `pytest --collect-only -q` 로 확인.
+정확한 수는 `pytest --collect-only -q` 로 확인 (2026-08-19 감사 개선 반영 후 260+).
 
 ### 허메틱(격리) 규칙 — CI 재발 방지
 
@@ -179,7 +183,8 @@ EXE는 실행 파일과 같은 폴더에 `config.json`, `sync_history.db`, `logs
 | Calibre Watch | watchdog | 동일 |
 | googletrans 번역 | googletrans | 동일 |
 
-새 스크래퍼 추가 시 `x3_websync.spec` 의 `hiddenimports` 에 모듈을 넣어야 합니다.
+새 스크래퍼·GUI 서브모듈 추가 시 `x3_websync.spec` 의 `hiddenimports` 에 모듈을 넣어야 합니다.  
+업데이트 UI는 `websync.gui.settings_tab.updater` 입니다.
 
 ---
 
@@ -192,7 +197,7 @@ EXE는 실행 파일과 같은 폴더에 `config.json`, `sync_history.db`, `logs
   1. 원격 매니페스트 다운로드 시 CDN 캐시 우회(`Cache-Control: no-cache` + 타임스탬프 파라미터).
   2. Ed25519 서명, HTTPS URL, SHA-256 해시, 크기 상한(500MB), 만료일 무결성 검증.
   3. 실시간 스트리밍 해시 검증 및 다운로드 취소(`cancel_event`) 지원.
-  4. 이전 버전 자동 백업(`.bak`) 및 `--smoke` 검증 실패 시 자동 롤백.
+  4. 이전 버전 자동 백업(`.bak`) 및 `--smoke`(핵심 모듈 import) 실패 시 자동 롤백.
 
 ### 배포 절차 (GitHub Actions)
 1. `websync/__init__.py`의 `__version__ = "X.Y.Z"` 업데이트 및 커밋.

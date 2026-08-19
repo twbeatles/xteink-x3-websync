@@ -201,5 +201,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "message": "✅ 동기화가 백그라운드에서 시작됩니다.",
                 },
             )
+        elif self.path == "/api/cancel":
+            if not self._require_auth():
+                return
+            cancel_cb = self._ctx.cancel_callback
+            if not cancel_cb:
+                self._send_json(503, {"ok": False, "message": "취소 콜백이 설정되지 않았습니다."})
+                return
+            try:
+                cancel_cb()
+            except Exception as e:
+                self._send_json(500, {"ok": False, "message": f"취소 요청 실패: {e}"})
+                return
+            self._send_json(200, {"ok": True, "message": "⏹ 동기화 취소가 요청되었습니다."})
         else:
             self.send_error(404)
